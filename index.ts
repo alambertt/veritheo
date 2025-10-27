@@ -1,0 +1,56 @@
+import { config } from "dotenv";
+import { Bot } from "grammy";
+
+config();
+
+const token = process.env.TELEGRAM_BOT_TOKEN;
+if (!token) {
+  throw new Error("TELEGRAM_BOT_TOKEN environment variable is not set");
+}
+
+const bot = new Bot(token);
+
+bot.command("start", (ctx) => {
+  ctx.reply("Bienvenido a Veritheo! 🙏 Soy tu asistente teológico. Hazme cualquier pregunta teológica y te ayudaré a explorar las profundidades de la fe y la verdad. Usa /help para más información.");
+});
+
+bot.command("ask", (ctx) => {
+  ctx.reply("Pregunta lo que quieras en el chat privado");
+});
+
+bot.command("ask_group", (ctx) => {
+  ctx.reply("Pregunta en el grupo tomando como contexto los mensajes anteriores");
+});
+
+bot.command("help", (ctx) => {
+  ctx.reply(`
+Bienvenido a Veritheo - Tu Guía Teológica
+
+Comandos disponibles:
+/ask - Pregunta lo que quieras en el chat privado
+/ask_group - Pregunta en el grupo tomando como contexto los mensajes anteriores
+/help - Lo que necesitas saber para utilizar este bot
+/persona - Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura
+
+Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orientación.
+  `.trim());
+});
+
+bot.command("persona", (ctx) => {
+  ctx.reply("Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura");
+});
+
+bot.command("ping", (ctx) => {
+  ctx.reply("🏓 Pong!");
+});
+
+// bot.on("message", (ctx) => {
+//   console.log("Message received:", ctx.message.text);
+// });
+
+bot.catch((err) => {
+  console.error("Error:", err);
+});
+
+console.log("Starting bot...");
+bot.start();

@@ -1,0 +1,27 @@
+{
+    "workbench.colorCustomizations": {
+        "activityBar.activeBackground": "#9dab65",
+        "activityBar.background": "#9dab65",
+        "activityBar.foreground": "#15202b",
+        "activityBar.inactiveForeground": "#15202b99",
+        "activityBarBadge.background": "#eaf2f4",
+        "activityBarBadge.foreground": "#15202b",
+        "commandCenter.border": "#15202b99",
+        "sash.hoverBorder": "#9dab65",
+        "sideBar.border": "#9dab65",
+        "statusBar.background": "#828f4e",
+        "statusBar.foreground": "#15202b",
+        "statusBarItem.hoverBackground": "#646e3c",
+        "statusBarItem.remoteBackground": "#828f4e",
+        "statusBarItem.remoteForeground": "#15202b",
+        "tab.activeBorder": "#9dab65",
+        "titleBar.activeBackground": "#828f4e",
+        "titleBar.activeForeground": "#15202b",
+        "titleBar.inactiveBackground": "#828f4e99",
+        "titleBar.inactiveForeground": "#15202b99"
+    },
+    "peacock.color": "#828f4e",
+    "cSpell.words": [
+        "Veritheo"
+    ]
+}
