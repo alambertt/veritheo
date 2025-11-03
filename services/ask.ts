@@ -15,11 +15,9 @@ export async function askHandler(question: string, messagesContext?: string[]) {
       { role: 'user' as const, content: question },
     ],
   });
-  if (text && (process.env.NODE_ENV === 'development' || process.env.LOG_ASK_HANDLER_RESPONSES === 'true')) {
-    console.log('🚀 ~ askHandler ~ providerMetadata:', providerMetadata);
-    console.log('🚀 ~ askHandler ~ sources:', sources);
-    console.log('🚀 ~ askHandler ~ text:', text);
-  }
+  console.log('🚀 ~ askHandler ~ providerMetadata:', providerMetadata);
+  console.log('🚀 ~ askHandler ~ sources:', sources);
+  console.log('🚀 ~ askHandler ~ text:', text);
 
   // access the grounding metadata.
   const metadata = providerMetadata?.google;

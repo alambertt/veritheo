@@ -1,5 +1,7 @@
 import { config } from "dotenv";
-import { Bot } from "grammy";
+import { Bot, GrammyError } from "grammy";
+import type { Context } from "grammy";
+import type { ParseMode } from "grammy/types";
 import { askHandler } from './services/ask';
 import {
   buildTelegramMessageRecord,
@@ -21,13 +23,49 @@ const bot = new Bot(token);
 const database = initializeDatabase();
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
-const BOT_ID = process.env.BOT_ID || "";
+const GENERIC_ERROR_MESSAGE =
+  'Lo siento, ha ocurrido un error mientras procesaba tu solicitud. Por favor, inténtalo de nuevo más tarde.';
 
 async function limitTelegramText(text: string): Promise<string> {
   if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
     return text;
   }
   return await summarizeText(text, TELEGRAM_MESSAGE_LIMIT);
+}
+
+async function replyWithLLMMessage(ctx: Context, text: string, options?: { preferMarkdown?: boolean }) {
+  const limitedText = await limitTelegramText(text);
+  const attempts: (ParseMode | undefined)[] =
+    options?.preferMarkdown === false ? [undefined] : ['Markdown', undefined];
+  let lastError: unknown;
+
+  for (const parseMode of attempts) {
+    try {
+      const replyMessage = await ctx.reply(
+        limitedText,
+        parseMode ? { parse_mode: parseMode } : undefined
+      );
+      try {
+        const botRawMessage = mapToTelegramRawMessage(replyMessage);
+        const botRecord = buildTelegramMessageRecord(botRawMessage);
+        storeTelegramMessage(database, botRecord);
+      } catch (persistError) {
+        console.error('Failed to persist bot reply message:', persistError);
+      }
+      return replyMessage;
+    } catch (error) {
+      lastError = error;
+      if (parseMode) {
+        const description =
+          error instanceof GrammyError ? error.description : error instanceof Error ? error.message : String(error);
+        console.warn(`Markdown send failed (${description}). Retrying without formatting.`);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError ?? new Error('Failed to send reply.');
 }
 
 bot.command('start', ctx => {
@@ -37,52 +75,60 @@ bot.command('start', ctx => {
 });
 
 bot.command('ask', async ctx => {
-  const question = ctx.message?.text.split(' ').slice(1).join(' ');
-  if (!question) {
-    ctx.reply('Por favor, proporciona una pregunta después del comando /ask.');
-    return;
-  }
-  const response = await askHandler(question);
-  if (response.text) {
-    await ctx.reply(await limitTelegramText(response.text), { parse_mode: 'Markdown' });
+  try {
+    const question = ctx.message?.text.split(' ').slice(1).join(' ');
+    if (!question) {
+      await ctx.reply('Por favor, proporciona una pregunta después del comando /ask.');
+      return;
+    }
+    const response = await askHandler(question);
+    if (response.text) {
+      await replyWithLLMMessage(ctx, response.text);
+    }
+  } catch (error) {
+    console.error('Failed to process /ask command:', error);
+    try {
+      await replyWithLLMMessage(ctx, GENERIC_ERROR_MESSAGE);
+    } catch (replyError) {
+      console.error('Failed to send /ask error message:', replyError);
+    }
   }
 });
 
 bot.command("ask_group", async (ctx) => {
-  const question = ctx.message?.text.split(' ').slice(1).join(' ').trim();
-  console.log('🚀 ~ question:', question)
-  if (!question) {
-    ctx.reply('Por favor, proporciona una pregunta después del comando /ask_group.');
-    return;
-  }
-
-  const chatId = ctx.chat?.id;
-  let contextMessages: string[] | undefined;
-
-  if (chatId) {
-    const storedMessages = getMessagesByChat(database, chatId, { limit: 10, order: 'desc' });
-    const textMessages = storedMessages
-      .filter((msg) => msg.text && msg.text.trim() !== '' && msg.message_id !== ctx.message?.message_id)
-      .map((msg) => msg.text!.trim())
-      .reverse();
-
-    if (textMessages.length > 0) {
-      contextMessages = textMessages;
+  try {
+    const question = ctx.message?.text.split(' ').slice(1).join(' ').trim();
+    console.log('🚀 ~ question:', question)
+    if (!question) {
+      await ctx.reply('Por favor, proporciona una pregunta después del comando /ask_group.');
+      return;
     }
-  }
 
-  const response = await askHandler(question, contextMessages);
-  if (response.text) {
-    const recordQuestion = buildTelegramMessageRecord(mapToTelegramRawMessage(ctx.message!));
-    storeTelegramMessage(database, recordQuestion);
-    const recordAnswer = buildTelegramMessageRecord({
-      ...mapToTelegramRawMessage(ctx.message!),
-      text: response.text,
-      from_id: parseInt(BOT_ID),
-      from_is_bot: true,
-    });
-    storeTelegramMessage(database, recordAnswer);
-    await ctx.reply(await limitTelegramText(response.text), { parse_mode: 'Markdown' });
+    let contextMessages: string[] | undefined;
+    const chatId = ctx.chat?.id;
+    if (chatId) {
+      const storedMessages = getMessagesByChat(database, chatId, { limit: 10, order: 'desc' });
+      const textMessages = storedMessages
+        .filter((msg) => msg.text && msg.text.trim() !== '' && msg.message_id !== ctx.message?.message_id)
+        .map((msg) => msg.text!.trim())
+        .reverse();
+
+      if (textMessages.length > 0) {
+        contextMessages = textMessages;
+      }
+    }
+
+    const response = await askHandler(question, contextMessages);
+    if (response.text) {
+      await replyWithLLMMessage(ctx, response.text);
+    }
+  } catch (error) {
+    console.error('Failed to process /ask_group command:', error);
+    try {
+      await replyWithLLMMessage(ctx, GENERIC_ERROR_MESSAGE);
+    } catch (replyError) {
+      console.error('Failed to send /ask_group error message:', replyError);
+    }
   }
 });
 
