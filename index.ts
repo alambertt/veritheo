@@ -1,7 +1,7 @@
-import { config } from "dotenv";
-import { Bot, GrammyError } from "grammy";
-import type { Context } from "grammy";
-import type { ParseMode } from "grammy/types";
+import { config } from 'dotenv';
+import { Bot, GrammyError } from 'grammy';
+import type { Context } from 'grammy';
+import type { ParseMode } from 'grammy/types';
 import { askHandler } from './services/ask';
 import {
   buildTelegramMessageRecord,
@@ -16,7 +16,7 @@ config();
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {
-  throw new Error("TELEGRAM_BOT_TOKEN environment variable is not set");
+  throw new Error('TELEGRAM_BOT_TOKEN environment variable is not set');
 }
 
 const bot = new Bot(token);
@@ -68,8 +68,7 @@ function buildSourcesMessage(sources: unknown): string | undefined {
 
     seenUrls.add(trimmedUrl);
 
-    let displayTitle =
-      typeof title === 'string' && title.trim() !== '' ? title.trim() : undefined;
+    let displayTitle = typeof title === 'string' && title.trim() !== '' ? title.trim() : undefined;
     if (!displayTitle) {
       try {
         const parsedUrl = new URL(trimmedUrl);
@@ -89,28 +88,37 @@ function buildSourcesMessage(sources: unknown): string | undefined {
     return undefined;
   }
 
-  const lines = formattedSources.map(
-    ({ title, url }) => `- [${title}](${url})`
-  );
+  const lines = formattedSources.map(({ title, url }) => `- [${title}](${url})`);
 
-  return [
-    '🙏 Gracias por tu pregunta. Aquí encuentras las fuentes consultadas:',
-    '',
-    ...lines,
-  ].join('\n');
+  return ['🙏 Gracias por tu pregunta. Aquí encuentras las fuentes consultadas:', '', ...lines].join('\n');
 }
 
-async function replyWithLLMMessage(ctx: Context, text: string, options?: { preferMarkdown?: boolean }) {
+async function replyWithLLMMessage(
+  ctx: Context,
+  text: string,
+  options?: { preferMarkdown?: boolean; replyToMessageId?: number }
+) {
   const limitedText = await limitTelegramText(text);
-  const attempts: (ParseMode | undefined)[] =
-    options?.preferMarkdown === false ? [undefined] : ['Markdown', undefined];
+  const attempts: (ParseMode | undefined)[] = options?.preferMarkdown === false ? [undefined] : ['Markdown', undefined];
   let lastError: unknown;
+  const replyToMessageId =
+    typeof options?.replyToMessageId === 'number' ? options.replyToMessageId : ctx.message?.message_id;
 
   for (const parseMode of attempts) {
     try {
       const replyMessage = await ctx.reply(
         limitedText,
-        parseMode ? { parse_mode: parseMode } : undefined
+        parseMode || replyToMessageId
+          ? {
+              ...(parseMode ? { parse_mode: parseMode } : {}),
+              ...(replyToMessageId
+                ? {
+                    reply_to_message_id: replyToMessageId,
+                    allow_sending_without_reply: true,
+                  }
+                : {}),
+            }
+          : undefined
       );
       try {
         const botRawMessage = mapToTelegramRawMessage(replyMessage);
@@ -148,7 +156,7 @@ bot.command('ask', async ctx => {
       await ctx.reply('Por favor, proporciona una pregunta después del comando /ask.');
       return;
     }
-    const {text, sources} = await askHandler(question);
+    const { text, sources } = await askHandler(question);
     if (text) {
       await replyWithLLMMessage(ctx, text);
     }
@@ -166,10 +174,10 @@ bot.command('ask', async ctx => {
   }
 });
 
-bot.command("ask_group", async (ctx) => {
+bot.command('ask_group', async ctx => {
   try {
     const question = ctx.message?.text.split(' ').slice(1).join(' ').trim();
-    console.log('🚀 ~ question:', question)
+    console.log('🚀 ~ question:', question);
     if (!question) {
       await ctx.reply('Por favor, proporciona una pregunta después del comando /ask_group.');
       return;
@@ -180,8 +188,8 @@ bot.command("ask_group", async (ctx) => {
     if (chatId) {
       const storedMessages = getMessagesByChat(database, chatId, { limit: 10, order: 'desc' });
       const textMessages = storedMessages
-        .filter((msg) => msg.text && msg.text.trim() !== '' && msg.message_id !== ctx.message?.message_id)
-        .map((msg) => msg.text!.trim())
+        .filter(msg => msg.text && msg.text.trim() !== '' && msg.message_id !== ctx.message?.message_id)
+        .map(msg => msg.text!.trim())
         .reverse();
 
       if (textMessages.length > 0) {
@@ -207,8 +215,9 @@ bot.command("ask_group", async (ctx) => {
   }
 });
 
-bot.command("help", (ctx) => {
-  ctx.reply(`
+bot.command('help', ctx => {
+  ctx.reply(
+    `
 Bienvenido a Veritheo - Tu Guía Teológica
 
 Comandos disponibles:
@@ -218,18 +227,19 @@ Comandos disponibles:
 /persona - Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura
 
 Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orientación.
-  `.trim());
+  `.trim()
+  );
 });
 
-bot.command("persona", (ctx) => {
-  ctx.reply("Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura");
+bot.command('persona', ctx => {
+  ctx.reply('Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura');
 });
 
-bot.command("ping", (ctx) => {
-  ctx.reply("🏓 Pong!");
+bot.command('ping', ctx => {
+  ctx.reply('🏓 Pong!');
 });
 
-bot.on("message", (ctx) => {
+bot.on('message', ctx => {
   if (!ctx.message) {
     return;
   }
@@ -243,13 +253,13 @@ bot.on("message", (ctx) => {
     const record = buildTelegramMessageRecord(rawMessage);
     storeTelegramMessage(database, record);
   } catch (error) {
-    console.error("Failed to persist message:", error);
+    console.error('Failed to persist message:', error);
   }
 });
 
-bot.catch((err) => {
-  console.error("Error:", err);
+bot.catch(err => {
+  console.error('Error:', err);
 });
 
-console.log("Starting bot...");
+console.log('Starting bot...');
 bot.start();
