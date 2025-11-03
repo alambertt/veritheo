@@ -1,5 +1,12 @@
 import { config } from "dotenv";
 import { Bot } from "grammy";
+import { askExample } from './services/ask';
+import {
+  buildTelegramMessageRecord,
+  initializeDatabase,
+  mapToTelegramRawMessage,
+  storeTelegramMessage,
+} from './services/sqlite';
 
 config();
 
@@ -9,6 +16,7 @@ if (!token) {
 }
 
 const bot = new Bot(token);
+const database = initializeDatabase();
 
 bot.command("start", (ctx) => {
   ctx.reply("Bienvenido a Veritheo! 🙏 Soy tu asistente teológico. Hazme cualquier pregunta teológica y te ayudaré a explorar las profundidades de la fe y la verdad. Usa /help para más información.");
@@ -44,9 +52,23 @@ bot.command("ping", (ctx) => {
   ctx.reply("🏓 Pong!");
 });
 
-// bot.on("message", (ctx) => {
-//   console.log("Message received:", ctx.message.text);
-// });
+bot.on("message", (ctx) => {
+  if (!ctx.message) {
+    return;
+  }
+
+  try {
+    const rawMessage = mapToTelegramRawMessage(ctx.message);
+    if (!rawMessage.text || rawMessage.text.trim() === '') {
+      return;
+    }
+
+    const record = buildTelegramMessageRecord(rawMessage);
+    storeTelegramMessage(database, record);
+  } catch (error) {
+    console.error("Failed to persist message:", error);
+  }
+});
 
 bot.catch((err) => {
   console.error("Error:", err);
