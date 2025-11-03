@@ -26,11 +26,78 @@ const TELEGRAM_MESSAGE_LIMIT = 4096;
 const GENERIC_ERROR_MESSAGE =
   'Lo siento, ha ocurrido un error mientras procesaba tu solicitud. Por favor, inténtalo de nuevo más tarde.';
 
+type AskSource = {
+  sourceType?: unknown;
+  url?: unknown;
+  title?: unknown;
+};
+
 async function limitTelegramText(text: string): Promise<string> {
   if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
     return text;
   }
   return await summarizeText(text, TELEGRAM_MESSAGE_LIMIT);
+}
+
+function escapeMarkdown(text: string): string {
+  return text.replace(/([\\*_`\[\]\(\)])/g, '\\$1');
+}
+
+function buildSourcesMessage(sources: unknown): string | undefined {
+  if (!Array.isArray(sources)) {
+    return undefined;
+  }
+
+  const seenUrls = new Set<string>();
+  const formattedSources: { title: string; url: string }[] = [];
+
+  for (const rawSource of sources) {
+    if (!rawSource || typeof rawSource !== 'object') {
+      continue;
+    }
+
+    const { sourceType, url, title } = rawSource as AskSource;
+    if (sourceType !== 'url' || typeof url !== 'string') {
+      continue;
+    }
+
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl || seenUrls.has(trimmedUrl)) {
+      continue;
+    }
+
+    seenUrls.add(trimmedUrl);
+
+    let displayTitle =
+      typeof title === 'string' && title.trim() !== '' ? title.trim() : undefined;
+    if (!displayTitle) {
+      try {
+        const parsedUrl = new URL(trimmedUrl);
+        displayTitle = parsedUrl.hostname ?? trimmedUrl;
+      } catch {
+        displayTitle = trimmedUrl;
+      }
+    }
+
+    formattedSources.push({
+      title: escapeMarkdown(displayTitle),
+      url: trimmedUrl,
+    });
+  }
+
+  if (formattedSources.length === 0) {
+    return undefined;
+  }
+
+  const lines = formattedSources.map(
+    ({ title, url }) => `- [${title}](${url})`
+  );
+
+  return [
+    '🙏 Gracias por tu pregunta. Aquí encuentras las fuentes consultadas:',
+    '',
+    ...lines,
+  ].join('\n');
 }
 
 async function replyWithLLMMessage(ctx: Context, text: string, options?: { preferMarkdown?: boolean }) {
@@ -81,9 +148,13 @@ bot.command('ask', async ctx => {
       await ctx.reply('Por favor, proporciona una pregunta después del comando /ask.');
       return;
     }
-    const response = await askHandler(question);
-    if (response.text) {
-      await replyWithLLMMessage(ctx, response.text);
+    const {text, sources} = await askHandler(question);
+    if (text) {
+      await replyWithLLMMessage(ctx, text);
+    }
+    const sourcesMessage = buildSourcesMessage(sources);
+    if (sourcesMessage) {
+      await replyWithLLMMessage(ctx, sourcesMessage);
     }
   } catch (error) {
     console.error('Failed to process /ask command:', error);
@@ -118,9 +189,13 @@ bot.command("ask_group", async (ctx) => {
       }
     }
 
-    const response = await askHandler(question, contextMessages);
-    if (response.text) {
-      await replyWithLLMMessage(ctx, response.text);
+    const { text, sources } = await askHandler(question, contextMessages);
+    if (text) {
+      await replyWithLLMMessage(ctx, text);
+    }
+    const sourcesMessage = buildSourcesMessage(sources);
+    if (sourcesMessage) {
+      await replyWithLLMMessage(ctx, sourcesMessage);
     }
   } catch (error) {
     console.error('Failed to process /ask_group command:', error);
