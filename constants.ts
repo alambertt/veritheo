@@ -1,0 +1,1 @@
+export const GOOGLE_MODEL_BASIC = 'gemini-2.5-flash';

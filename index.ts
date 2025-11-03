@@ -1,12 +1,14 @@
 import { config } from "dotenv";
 import { Bot } from "grammy";
-import { askExample } from './services/ask';
+import { askHandler } from './services/ask';
 import {
   buildTelegramMessageRecord,
+  getMessagesByChat,
   initializeDatabase,
   mapToTelegramRawMessage,
   storeTelegramMessage,
 } from './services/sqlite';
+import { summarizeText } from './services/summarize';
 
 config();
 
@@ -18,16 +20,70 @@ if (!token) {
 const bot = new Bot(token);
 const database = initializeDatabase();
 
-bot.command("start", (ctx) => {
-  ctx.reply("Bienvenido a Veritheo! 🙏 Soy tu asistente teológico. Hazme cualquier pregunta teológica y te ayudaré a explorar las profundidades de la fe y la verdad. Usa /help para más información.");
+const TELEGRAM_MESSAGE_LIMIT = 4096;
+const BOT_ID = process.env.BOT_ID || "";
+
+async function limitTelegramText(text: string): Promise<string> {
+  if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
+    return text;
+  }
+  return await summarizeText(text, TELEGRAM_MESSAGE_LIMIT);
+}
+
+bot.command('start', ctx => {
+  ctx.reply(
+    'Bienvenido a Veritheo! 🙏 Soy tu asistente teológico. Hazme cualquier pregunta teológica y te ayudaré a explorar las profundidades de la fe y la verdad. Usa /help para más información.'
+  );
 });
 
-bot.command("ask", (ctx) => {
-  ctx.reply("Pregunta lo que quieras en el chat privado");
+bot.command('ask', async ctx => {
+  const question = ctx.message?.text.split(' ').slice(1).join(' ');
+  if (!question) {
+    ctx.reply('Por favor, proporciona una pregunta después del comando /ask.');
+    return;
+  }
+  const response = await askHandler(question);
+  if (response.text) {
+    await ctx.reply(await limitTelegramText(response.text), { parse_mode: 'Markdown' });
+  }
 });
 
-bot.command("ask_group", (ctx) => {
-  ctx.reply("Pregunta en el grupo tomando como contexto los mensajes anteriores");
+bot.command("ask_group", async (ctx) => {
+  const question = ctx.message?.text.split(' ').slice(1).join(' ').trim();
+  console.log('🚀 ~ question:', question)
+  if (!question) {
+    ctx.reply('Por favor, proporciona una pregunta después del comando /ask_group.');
+    return;
+  }
+
+  const chatId = ctx.chat?.id;
+  let contextMessages: string[] | undefined;
+
+  if (chatId) {
+    const storedMessages = getMessagesByChat(database, chatId, { limit: 10, order: 'desc' });
+    const textMessages = storedMessages
+      .filter((msg) => msg.text && msg.text.trim() !== '' && msg.message_id !== ctx.message?.message_id)
+      .map((msg) => msg.text!.trim())
+      .reverse();
+
+    if (textMessages.length > 0) {
+      contextMessages = textMessages;
+    }
+  }
+
+  const response = await askHandler(question, contextMessages);
+  if (response.text) {
+    const recordQuestion = buildTelegramMessageRecord(mapToTelegramRawMessage(ctx.message!));
+    storeTelegramMessage(database, recordQuestion);
+    const recordAnswer = buildTelegramMessageRecord({
+      ...mapToTelegramRawMessage(ctx.message!),
+      text: response.text,
+      from_id: parseInt(BOT_ID),
+      from_is_bot: true,
+    });
+    storeTelegramMessage(database, recordAnswer);
+    await ctx.reply(await limitTelegramText(response.text), { parse_mode: 'Markdown' });
+  }
 });
 
 bot.command("help", (ctx) => {
