@@ -10,6 +10,7 @@ import {
   storeTelegramMessage,
 } from './services/sqlite';
 import { verifyMessageContent } from './services/verify';
+import { detectMessageFallacies } from './services/fallacy-detector';
 import { replyWithLLMMessage } from './services/reply';
 import { buildSourcesMessage } from './services/sources';
 
@@ -22,6 +23,7 @@ if (!token) {
 
 const bot = new Bot(token);
 const database = initializeDatabase();
+const UNTOUCHABLE_USER_IDS = [738668189];
 
 const GENERIC_ERROR_MESSAGE =
   'Lo siento, ha ocurrido un error mientras procesaba tu solicitud. Por favor, inténtalo de nuevo más tarde.';
@@ -198,6 +200,89 @@ bot.command('verify', async ctx => {
       await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
     } catch (replyError) {
       console.error('Failed to send /verify error message:', replyError);
+    }
+  }
+});
+
+bot.command('fallacy_detector', async ctx => {
+  try {
+    if (!ctx.message?.reply_to_message || !ctx.chat?.id) {
+      await ctx.reply('Por favor, responde al mensaje que deseas analizar y luego usa /fallacy_detector.');
+      return;
+    }
+
+    const replyToId = ctx.message.reply_to_message.message_id;
+    const chatId = ctx.chat.id;
+    let messageToAnalyze: string | undefined;
+    let authorName: string | undefined;
+    let authorId: number | undefined;
+
+    try {
+      const storedMessage = getMessageByChatAndMessageId(database, chatId, replyToId);
+      if (storedMessage?.text?.trim()) {
+        messageToAnalyze = storedMessage.text.trim();
+        authorId = storedMessage.from_id ?? undefined;
+        authorName =
+          formatDisplayName([storedMessage.from_first_name, storedMessage.from_last_name]) ??
+          storedMessage.from_username;
+      }
+    } catch (dbError) {
+      console.error('Failed to retrieve message from database for /fallacy_detector:', dbError);
+    }
+
+    if (!messageToAnalyze) {
+      const replied = ctx.message.reply_to_message;
+      const repliedText =
+        'text' in replied && typeof replied.text === 'string'
+          ? replied.text
+          : 'caption' in replied && typeof replied.caption === 'string'
+            ? replied.caption
+            : undefined;
+      if (repliedText?.trim()) {
+        messageToAnalyze = repliedText.trim();
+      }
+      if ('from' in replied && replied.from) {
+        authorId = replied.from.id;
+        if (!authorName) {
+          authorName =
+            formatDisplayName([replied.from.first_name, replied.from.last_name]) ?? replied.from.username ?? undefined;
+        }
+      }
+    }
+
+    if (!messageToAnalyze) {
+      await ctx.reply(
+        'No pude encontrar el contenido del mensaje original. Asegúrate de responder a un mensaje de texto antes de usar /fallacy_detector.'
+      );
+      return;
+    }
+
+    if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
+      await ctx.reply('😇 Este sabio infalible nunca se equivoca, así que no puedo analizar sus mensajes por respeto a su legendaria sabiduría. ✨');
+      return;
+    }
+
+    const { text } = await detectMessageFallacies(messageToAnalyze, {
+      authorName,
+      chatTitle:
+        'title' in ctx.chat && typeof ctx.chat.title === 'string'
+          ? ctx.chat.title
+          : 'username' in ctx.chat
+            ? ctx.chat.username
+            : undefined,
+    });
+
+    if (text) {
+      await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
+    } else {
+      await ctx.reply('No se obtuvo un análisis válido del mensaje. Intenta nuevamente más tarde.');
+    }
+  } catch (error) {
+    console.error('Failed to process /fallacy_detector command:', error);
+    try {
+      await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
+    } catch (replyError) {
+      console.error('Failed to send /fallacy_detector error message:', replyError);
     }
   }
 });
