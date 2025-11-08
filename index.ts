@@ -13,6 +13,7 @@ import { verifyMessageContent } from './services/verify';
 import { detectMessageFallacies } from './services/fallacy-detector';
 import { replyWithLLMMessage } from './services/reply';
 import { buildSourcesMessage } from './services/sources';
+import { startTypingIndicator } from './services/typing-indicator';
 
 config();
 
@@ -23,7 +24,8 @@ if (!token) {
 
 const bot = new Bot(token);
 const database = initializeDatabase();
-const UNTOUCHABLE_USER_IDS = [738668189];
+const UNTOUCHABLE_USER_IDS = [ 738668189 ];
+const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ? parseInt(process.env.CHANNEL_LOGS_ID, 10) : undefined;
 
 const GENERIC_ERROR_MESSAGE =
   'Lo siento, ha ocurrido un error mientras procesaba tu solicitud. Por favor, inténtalo de nuevo más tarde.';
@@ -51,13 +53,18 @@ bot.command('ask', async ctx => {
       await ctx.reply('Por favor, proporciona una pregunta después del comando /ask.');
       return;
     }
-    const { text, sources } = await askHandler(question);
-    if (text) {
-      await replyWithLLMMessage(ctx, database, text);
-    }
-    const sourcesMessage = buildSourcesMessage(sources);
-    if (sourcesMessage) {
-      await replyWithLLMMessage(ctx, database, sourcesMessage);
+    const stopTyping = startTypingIndicator(ctx);
+    try {
+      const { text, sources } = await askHandler(question);
+      if (text) {
+        await replyWithLLMMessage(ctx, database, text);
+      }
+      const sourcesMessage = buildSourcesMessage(sources);
+      if (sourcesMessage) {
+        await replyWithLLMMessage(ctx, database, sourcesMessage);
+      }
+    } finally {
+      stopTyping();
     }
   } catch (error) {
     console.error('Failed to process /ask command:', error);
@@ -92,13 +99,18 @@ bot.command('ask_group', async ctx => {
       }
     }
 
-    const { text, sources } = await askHandler(question, contextMessages);
-    if (text) {
-      await replyWithLLMMessage(ctx, database, text);
-    }
-    const sourcesMessage = buildSourcesMessage(sources);
-    if (sourcesMessage) {
-      await replyWithLLMMessage(ctx, database, sourcesMessage);
+    const stopTyping = startTypingIndicator(ctx);
+    try {
+      const { text, sources } = await askHandler(question, contextMessages);
+      if (text) {
+        await replyWithLLMMessage(ctx, database, text);
+      }
+      const sourcesMessage = buildSourcesMessage(sources);
+      if (sourcesMessage) {
+        await replyWithLLMMessage(ctx, database, sourcesMessage);
+      }
+    } finally {
+      stopTyping();
     }
   } catch (error) {
     console.error('Failed to process /ask_group command:', error);
@@ -185,20 +197,25 @@ bot.command('verify', async ctx => {
       return;
     }
 
-    const { text } = await verifyMessageContent(messageToVerify, {
-      authorName,
-      chatTitle:
-        'title' in ctx.chat && typeof ctx.chat.title === 'string'
-          ? ctx.chat.title
-          : 'username' in ctx.chat
-            ? ctx.chat.username
-            : undefined,
-    });
+    const stopTyping = startTypingIndicator(ctx);
+    try {
+      const { text } = await verifyMessageContent(messageToVerify, {
+        authorName,
+        chatTitle:
+          'title' in ctx.chat && typeof ctx.chat.title === 'string'
+            ? ctx.chat.title
+            : 'username' in ctx.chat
+              ? ctx.chat.username
+              : undefined,
+      });
 
-    if (text) {
-      await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
-    } else {
-      await ctx.reply('No se obtuvo un análisis válido del mensaje. Intenta nuevamente más tarde.');
+      if (text) {
+        await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
+      } else {
+        await ctx.reply('No se obtuvo un análisis válido del mensaje. Intenta nuevamente más tarde.');
+      }
+    } finally {
+      stopTyping();
     }
   } catch (error) {
     console.error('Failed to process /verify command:', error);
@@ -268,20 +285,25 @@ bot.command('fallacy_detector', async ctx => {
       return;
     }
 
-    const { text } = await detectMessageFallacies(messageToAnalyze, {
-      authorName,
-      chatTitle:
-        'title' in ctx.chat && typeof ctx.chat.title === 'string'
-          ? ctx.chat.title
-          : 'username' in ctx.chat
-            ? ctx.chat.username
-            : undefined,
-    });
+    const stopTyping = startTypingIndicator(ctx);
+    try {
+      const { text } = await detectMessageFallacies(messageToAnalyze, {
+        authorName,
+        chatTitle:
+          'title' in ctx.chat && typeof ctx.chat.title === 'string'
+            ? ctx.chat.title
+            : 'username' in ctx.chat
+              ? ctx.chat.username
+              : undefined,
+      });
 
-    if (text) {
-      await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
-    } else {
-      await ctx.reply('No se obtuvo un análisis válido del mensaje. Intenta nuevamente más tarde.');
+      if (text) {
+        await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
+      } else {
+        await ctx.reply('No se obtuvo un análisis válido del mensaje. Intenta nuevamente más tarde.');
+      }
+    } finally {
+      stopTyping();
     }
   } catch (error) {
     console.error('Failed to process /fallacy_detector command:', error);
