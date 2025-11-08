@@ -141,6 +141,12 @@ bot.command('verify', async ctx => {
     const chatId = ctx.chat.id;
     let messageToVerify: string | undefined;
     let authorName: string | undefined;
+    const authorId = ctx.message.reply_to_message.from?.id;
+
+    if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
+      await ctx.reply('😇 Este sabio infalible nunca se equivoca, así que no puedo verificar sus mensajes por respeto a su legendaria sabiduría. ✨');
+      return;
+    }
 
     try {
       const storedMessage = getMessageByChatAndMessageId(database, chatId, replyToId);
