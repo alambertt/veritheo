@@ -14,6 +14,7 @@ import { detectMessageFallacies } from './services/fallacy-detector';
 import { replyWithLLMMessage } from './services/reply';
 import { buildSourcesMessage } from './services/sources';
 import { startTypingIndicator } from './services/typing-indicator';
+import { createChannelLogger, formatChatLabel, formatDisplayName, formatUserLabel } from './services/channel-logs';
 
 config();
 
@@ -25,22 +26,15 @@ if (!token) {
 const bot = new Bot(token);
 const database = initializeDatabase();
 const UNTOUCHABLE_USER_IDS = [ 738668189 ];
-const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ? parseInt(process.env.CHANNEL_LOGS_ID, 10) : undefined;
+const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ?? undefined;
 
 const GENERIC_ERROR_MESSAGE =
   'Lo siento, ha ocurrido un error mientras procesaba tu solicitud. Por favor, inténtalo de nuevo más tarde.';
 
-function formatDisplayName(parts: Array<string | undefined>): string | undefined {
-  const filtered = parts
-    .map(part => part?.trim())
-    .filter((part): part is string => Boolean(part && part.length > 0));
-  if (filtered.length === 0) {
-    return undefined;
-  }
-  return filtered.join(' ');
-}
+const { sendChannelLog, notifyError, logCommandInvocation } = createChannelLogger(token, CHANNEL_LOGS_ID);
 
 bot.command('start', ctx => {
+  logCommandInvocation(ctx, '/start');
   ctx.reply(
     'Bienvenido a Veritheo! 🙏 Soy tu asistente teológico. Hazme cualquier pregunta teológica y te ayudaré a explorar las profundidades de la fe y la verdad. Usa /help para más información.'
   );
@@ -49,6 +43,7 @@ bot.command('start', ctx => {
 bot.command('ask', async ctx => {
   try {
     const question = ctx.message?.text.split(' ').slice(1).join(' ');
+    logCommandInvocation(ctx, '/ask', [`Question: ${question?.trim() || '[none provided]'}`]);
     if (!question) {
       await ctx.reply('Por favor, proporciona una pregunta después del comando /ask.');
       return;
@@ -68,10 +63,12 @@ bot.command('ask', async ctx => {
     }
   } catch (error) {
     console.error('Failed to process /ask command:', error);
+    await notifyError(`Failed to process /ask command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
     try {
       await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
     } catch (replyError) {
       console.error('Failed to send /ask error message:', replyError);
+      await notifyError('Failed to send /ask error message', replyError);
     }
   }
 });
@@ -80,13 +77,15 @@ bot.command('ask_group', async ctx => {
   try {
     const question = ctx.message?.text.split(' ').slice(1).join(' ').trim();
     console.log('🚀 ~ question:', question);
+    logCommandInvocation(ctx, '/ask_group', [`Question: ${question || '[none provided]'}`]);
+    let contextMessages: string[] | undefined;
+    const chatId = ctx.chat?.id;
+
     if (!question) {
       await ctx.reply('Por favor, proporciona una pregunta después del comando /ask_group.');
       return;
     }
 
-    let contextMessages: string[] | undefined;
-    const chatId = ctx.chat?.id;
     if (chatId) {
       const storedMessages = getMessagesByChat(database, chatId, { limit: 10, order: 'desc' });
       const textMessages = storedMessages
@@ -114,15 +113,18 @@ bot.command('ask_group', async ctx => {
     }
   } catch (error) {
     console.error('Failed to process /ask_group command:', error);
+    await notifyError(`Failed to process /ask_group command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
     try {
       await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
     } catch (replyError) {
       console.error('Failed to send /ask_group error message:', replyError);
+      await notifyError('Failed to send /ask_group error message', replyError);
     }
   }
 });
 
 bot.command('help', ctx => {
+  logCommandInvocation(ctx, '/help');
   ctx.reply(
     `
 Bienvenido a Veritheo - Tu Guía Teológica
@@ -139,11 +141,15 @@ Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orie
 });
 
 bot.command('persona', ctx => {
+  logCommandInvocation(ctx, '/persona');
   ctx.reply('Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura');
 });
 
 bot.command('verify', async ctx => {
   try {
+    logCommandInvocation(ctx, '/verify', [
+      `ReplyToMessageId: ${ctx.message?.reply_to_message?.message_id ?? 'none'}`,
+    ]);
     if (!ctx.message?.reply_to_message || !ctx.chat?.id) {
       await ctx.reply('Por favor, responde al mensaje que deseas verificar y luego usa /verify.');
       return;
@@ -170,6 +176,7 @@ bot.command('verify', async ctx => {
       }
     } catch (dbError) {
       console.error('Failed to retrieve message from database:', dbError);
+      await notifyError('Failed to retrieve message from database for /verify command', dbError);
     }
 
     if (!messageToVerify) {
@@ -219,16 +226,21 @@ bot.command('verify', async ctx => {
     }
   } catch (error) {
     console.error('Failed to process /verify command:', error);
+    await notifyError(`Failed to process /verify command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
     try {
       await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
     } catch (replyError) {
       console.error('Failed to send /verify error message:', replyError);
+      await notifyError('Failed to send /verify error message', replyError);
     }
   }
 });
 
 bot.command('fallacy_detector', async ctx => {
   try {
+    logCommandInvocation(ctx, '/fallacy_detector', [
+      `ReplyToMessageId: ${ctx.message?.reply_to_message?.message_id ?? 'none'}`,
+    ]);
     if (!ctx.message?.reply_to_message || !ctx.chat?.id) {
       await ctx.reply('Por favor, responde al mensaje que deseas analizar y luego usa /fallacy_detector.');
       return;
@@ -251,6 +263,7 @@ bot.command('fallacy_detector', async ctx => {
       }
     } catch (dbError) {
       console.error('Failed to retrieve message from database for /fallacy_detector:', dbError);
+      await notifyError('Failed to retrieve message from database for /fallacy_detector command', dbError);
     }
 
     if (!messageToAnalyze) {
@@ -307,19 +320,22 @@ bot.command('fallacy_detector', async ctx => {
     }
   } catch (error) {
     console.error('Failed to process /fallacy_detector command:', error);
+    await notifyError(`Failed to process /fallacy_detector command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
     try {
       await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
     } catch (replyError) {
       console.error('Failed to send /fallacy_detector error message:', replyError);
+      await notifyError('Failed to send /fallacy_detector error message', replyError);
     }
   }
 });
 
 bot.command('ping', ctx => {
+  logCommandInvocation(ctx, '/ping');
   ctx.reply('🏓 Pong!');
 });
 
-bot.on('message', ctx => {
+bot.on('message', async ctx => {
   if (!ctx.message) {
     return;
   }
@@ -334,12 +350,15 @@ bot.on('message', ctx => {
     storeTelegramMessage(database, record);
   } catch (error) {
     console.error('Failed to persist message:', error);
+    await notifyError(`Failed to persist message (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
   }
 });
 
-bot.catch(err => {
+bot.catch(async err => {
   console.error('Error:', err);
+  await notifyError('Unhandled bot error', err);
 });
 
 console.log('Starting bot...');
+sendChannelLog('🚀 Bot starting...');
 bot.start();
