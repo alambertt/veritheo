@@ -1,16 +1,17 @@
 import { config } from 'dotenv';
-import { Bot, GrammyError } from 'grammy';
-import type { Context } from 'grammy';
-import type { ParseMode } from 'grammy/types';
+import { Bot } from 'grammy';
 import { askHandler } from './services/ask';
 import {
   buildTelegramMessageRecord,
   getMessagesByChat,
+  getMessageByChatAndMessageId,
   initializeDatabase,
   mapToTelegramRawMessage,
   storeTelegramMessage,
 } from './services/sqlite';
-import { summarizeText } from './services/summarize';
+import { verifyMessageContent } from './services/verify';
+import { replyWithLLMMessage } from './services/reply';
+import { buildSourcesMessage } from './services/sources';
 
 config();
 
@@ -22,125 +23,17 @@ if (!token) {
 const bot = new Bot(token);
 const database = initializeDatabase();
 
-const TELEGRAM_MESSAGE_LIMIT = 4096;
 const GENERIC_ERROR_MESSAGE =
   'Lo siento, ha ocurrido un error mientras procesaba tu solicitud. Por favor, inténtalo de nuevo más tarde.';
 
-type AskSource = {
-  sourceType?: unknown;
-  url?: unknown;
-  title?: unknown;
-};
-
-async function limitTelegramText(text: string): Promise<string> {
-  if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
-    return text;
-  }
-  return await summarizeText(text, TELEGRAM_MESSAGE_LIMIT);
-}
-
-function escapeMarkdown(text: string): string {
-  return text.replace(/([\\*_`\[\]\(\)])/g, '\\$1');
-}
-
-function buildSourcesMessage(sources: unknown): string | undefined {
-  if (!Array.isArray(sources)) {
+function formatDisplayName(parts: Array<string | undefined>): string | undefined {
+  const filtered = parts
+    .map(part => part?.trim())
+    .filter((part): part is string => Boolean(part && part.length > 0));
+  if (filtered.length === 0) {
     return undefined;
   }
-
-  const seenUrls = new Set<string>();
-  const formattedSources: { title: string; url: string }[] = [];
-
-  for (const rawSource of sources) {
-    if (!rawSource || typeof rawSource !== 'object') {
-      continue;
-    }
-
-    const { sourceType, url, title } = rawSource as AskSource;
-    if (sourceType !== 'url' || typeof url !== 'string') {
-      continue;
-    }
-
-    const trimmedUrl = url.trim();
-    if (!trimmedUrl || seenUrls.has(trimmedUrl)) {
-      continue;
-    }
-
-    seenUrls.add(trimmedUrl);
-
-    let displayTitle = typeof title === 'string' && title.trim() !== '' ? title.trim() : undefined;
-    if (!displayTitle) {
-      try {
-        const parsedUrl = new URL(trimmedUrl);
-        displayTitle = parsedUrl.hostname ?? trimmedUrl;
-      } catch {
-        displayTitle = trimmedUrl;
-      }
-    }
-
-    formattedSources.push({
-      title: escapeMarkdown(displayTitle),
-      url: trimmedUrl,
-    });
-  }
-
-  if (formattedSources.length === 0) {
-    return undefined;
-  }
-
-  const lines = formattedSources.map(({ title, url }) => `- [${title}](${url})`);
-
-  return ['🙏 Gracias por tu pregunta. Aquí encuentras las fuentes consultadas:', '', ...lines].join('\n');
-}
-
-async function replyWithLLMMessage(
-  ctx: Context,
-  text: string,
-  options?: { preferMarkdown?: boolean; replyToMessageId?: number }
-) {
-  const limitedText = await limitTelegramText(text);
-  const attempts: (ParseMode | undefined)[] = options?.preferMarkdown === false ? [undefined] : ['Markdown', undefined];
-  let lastError: unknown;
-  const replyToMessageId =
-    typeof options?.replyToMessageId === 'number' ? options.replyToMessageId : ctx.message?.message_id;
-
-  for (const parseMode of attempts) {
-    try {
-      const replyMessage = await ctx.reply(
-        limitedText,
-        parseMode || replyToMessageId
-          ? {
-              ...(parseMode ? { parse_mode: parseMode } : {}),
-              ...(replyToMessageId
-                ? {
-                    reply_to_message_id: replyToMessageId,
-                    allow_sending_without_reply: true,
-                  }
-                : {}),
-            }
-          : undefined
-      );
-      try {
-        const botRawMessage = mapToTelegramRawMessage(replyMessage);
-        const botRecord = buildTelegramMessageRecord(botRawMessage);
-        storeTelegramMessage(database, botRecord);
-      } catch (persistError) {
-        console.error('Failed to persist bot reply message:', persistError);
-      }
-      return replyMessage;
-    } catch (error) {
-      lastError = error;
-      if (parseMode) {
-        const description =
-          error instanceof GrammyError ? error.description : error instanceof Error ? error.message : String(error);
-        console.warn(`Markdown send failed (${description}). Retrying without formatting.`);
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  throw lastError ?? new Error('Failed to send reply.');
+  return filtered.join(' ');
 }
 
 bot.command('start', ctx => {
@@ -158,16 +51,16 @@ bot.command('ask', async ctx => {
     }
     const { text, sources } = await askHandler(question);
     if (text) {
-      await replyWithLLMMessage(ctx, text);
+      await replyWithLLMMessage(ctx, database, text);
     }
     const sourcesMessage = buildSourcesMessage(sources);
     if (sourcesMessage) {
-      await replyWithLLMMessage(ctx, sourcesMessage);
+      await replyWithLLMMessage(ctx, database, sourcesMessage);
     }
   } catch (error) {
     console.error('Failed to process /ask command:', error);
     try {
-      await replyWithLLMMessage(ctx, GENERIC_ERROR_MESSAGE);
+      await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
     } catch (replyError) {
       console.error('Failed to send /ask error message:', replyError);
     }
@@ -199,16 +92,16 @@ bot.command('ask_group', async ctx => {
 
     const { text, sources } = await askHandler(question, contextMessages);
     if (text) {
-      await replyWithLLMMessage(ctx, text);
+      await replyWithLLMMessage(ctx, database, text);
     }
     const sourcesMessage = buildSourcesMessage(sources);
     if (sourcesMessage) {
-      await replyWithLLMMessage(ctx, sourcesMessage);
+      await replyWithLLMMessage(ctx, database, sourcesMessage);
     }
   } catch (error) {
     console.error('Failed to process /ask_group command:', error);
     try {
-      await replyWithLLMMessage(ctx, GENERIC_ERROR_MESSAGE);
+      await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
     } catch (replyError) {
       console.error('Failed to send /ask_group error message:', replyError);
     }
@@ -233,6 +126,80 @@ Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orie
 
 bot.command('persona', ctx => {
   ctx.reply('Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura');
+});
+
+bot.command('verify', async ctx => {
+  try {
+    if (!ctx.message?.reply_to_message || !ctx.chat?.id) {
+      await ctx.reply('Por favor, responde al mensaje que deseas verificar y luego usa /verify.');
+      return;
+    }
+
+    const replyToId = ctx.message.reply_to_message.message_id;
+    const chatId = ctx.chat.id;
+    let messageToVerify: string | undefined;
+    let authorName: string | undefined;
+
+    try {
+      const storedMessage = getMessageByChatAndMessageId(database, chatId, replyToId);
+      if (storedMessage?.text?.trim()) {
+        messageToVerify = storedMessage.text.trim();
+        authorName =
+          formatDisplayName([storedMessage.from_first_name, storedMessage.from_last_name]) ??
+          storedMessage.from_username;
+      }
+    } catch (dbError) {
+      console.error('Failed to retrieve message from database:', dbError);
+    }
+
+    if (!messageToVerify) {
+      const replied = ctx.message.reply_to_message;
+      // Fallback al payload original entregado por la API de Telegram cuando la BD no tiene el mensaje.
+      const repliedText =
+        'text' in replied && typeof replied.text === 'string'
+          ? replied.text
+          : 'caption' in replied && typeof replied.caption === 'string'
+            ? replied.caption
+            : undefined;
+      if (repliedText?.trim()) {
+        messageToVerify = repliedText.trim();
+      }
+      if (!authorName && 'from' in replied && replied.from) {
+        authorName =
+          formatDisplayName([replied.from.first_name, replied.from.last_name]) ?? replied.from.username ?? undefined;
+      }
+    }
+
+    if (!messageToVerify) {
+      await ctx.reply(
+        'No pude encontrar el contenido del mensaje original. Asegúrate de responder a un mensaje de texto antes de usar /verify.'
+      );
+      return;
+    }
+
+    const { text } = await verifyMessageContent(messageToVerify, {
+      authorName,
+      chatTitle:
+        'title' in ctx.chat && typeof ctx.chat.title === 'string'
+          ? ctx.chat.title
+          : 'username' in ctx.chat
+            ? ctx.chat.username
+            : undefined,
+    });
+
+    if (text) {
+      await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
+    } else {
+      await ctx.reply('No se obtuvo un análisis válido del mensaje. Intenta nuevamente más tarde.');
+    }
+  } catch (error) {
+    console.error('Failed to process /verify command:', error);
+    try {
+      await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
+    } catch (replyError) {
+      console.error('Failed to send /verify error message:', replyError);
+    }
+  }
 });
 
 bot.command('ping', ctx => {

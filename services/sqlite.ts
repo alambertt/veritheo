@@ -312,3 +312,25 @@ export function queryMessages(db: Database, criteria: MessageQueryOptions = {}):
 
   return rows.map(mapStoredMessageRow);
 }
+
+export function getMessageByChatAndMessageId(
+  db: Database,
+  chatId: number,
+  messageId: number
+): StoredTelegramMessage | undefined {
+  const query = db.query(
+    `
+      SELECT *
+      FROM messages
+      WHERE chat_id = $chat_id AND message_id = $message_id
+      LIMIT 1
+    `
+  );
+
+  const row = query.get({
+    $chat_id: chatId,
+    $message_id: messageId,
+  });
+
+  return row ? mapStoredMessageRow(row) : undefined;
+}
