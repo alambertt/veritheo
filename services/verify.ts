@@ -1,6 +1,6 @@
 import { google } from '@ai-sdk/google';
 import { generateText } from 'ai';
-import { GOOGLE_MODEL_BASIC, GOOGLE_MODEL_PRO } from '../constants';
+import { GOOGLE_MODEL_LATEST } from '../constants';
 import { verifyPrompt } from '../prompts/verify';
 
 export interface VerifyMessageOptions {
@@ -28,7 +28,7 @@ export async function verifyMessageContent(message: string, options: VerifyMessa
     .join('\n');
 
   const { text } = await generateText({
-    model: google(GOOGLE_MODEL_PRO),
+    model: google(GOOGLE_MODEL_LATEST),
     system: verifyPrompt,
     messages: [{ role: 'user', content: userContent }],
   });

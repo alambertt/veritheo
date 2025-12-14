@@ -1,11 +1,11 @@
 import { google } from '@ai-sdk/google';
 import { generateText } from 'ai';
-import { GOOGLE_MODEL_BASIC, GOOGLE_MODEL_LATEST, GOOGLE_MODEL_PRO } from '../constants';
+import { GOOGLE_MODEL_LATEST } from '../constants';
 import { initialPrompt } from '../prompts/initial';
 
 export async function askHandler(question: string, messagesContext?: string[]) {
   const { text, sources, providerMetadata } = await generateText({
-    model: google(GOOGLE_MODEL_PRO),
+    model: google(GOOGLE_MODEL_LATEST),
     system: initialPrompt,
     tools: {
       google_search: google.tools.googleSearch({}),
