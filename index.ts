@@ -25,7 +25,7 @@ if (!token) {
 
 const bot = new Bot(token);
 const database = initializeDatabase();
-const UNTOUCHABLE_USER_IDS = [ 738668189 ];
+const UNTOUCHABLE_USER_IDS = [738668189, 929608851];
 const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ?? undefined;
 
 const GENERIC_ERROR_MESSAGE =
