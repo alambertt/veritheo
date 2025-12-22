@@ -11,6 +11,7 @@ import {
 } from './services/sqlite';
 import { verifyMessageContent } from './services/verify';
 import { detectMessageFallacies } from './services/fallacy-detector';
+import { roastMessageContent } from './services/roast';
 import { replyWithLLMMessage } from './services/reply';
 import { buildSourcesMessage } from './services/sources';
 import { startTypingIndicator } from './services/typing-indicator';
@@ -136,6 +137,7 @@ Comandos disponibles:
 /persona - Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura
 /verify - Responde a un mensaje para verificar su contenido y citar posibles errores
 /fallacy_detector - Analiza un mensaje en busca de falacias argumentativas
+/roast - Refuta un argumento usando los mejores contraargumentos del espectro teológico contrario
 
 Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orientación.
   `.trim()
@@ -328,6 +330,117 @@ bot.command('fallacy_detector', async ctx => {
     } catch (replyError) {
       console.error('Failed to send /fallacy_detector error message:', replyError);
       await notifyError('Failed to send /fallacy_detector error message', replyError);
+    }
+  }
+});
+
+bot.command('roast', async ctx => {
+  try {
+    const replyToMessage = ctx.message?.reply_to_message;
+    const chatId = ctx.chat?.id;
+    const directArgument = ctx.message?.text ? ctx.message.text.split(' ').slice(1).join(' ').trim() : '';
+    const replyToId = replyToMessage?.message_id;
+
+    logCommandInvocation(ctx, '/roast', [
+      `ReplyToMessageId: ${replyToId ?? 'none'}`,
+      `Argument: ${directArgument || '[none provided]'}`,
+    ]);
+
+    let messageToRoast: string | undefined;
+    let authorName: string | undefined;
+    let authorId: number | undefined;
+    let replyTargetId: number | undefined;
+
+    if (replyToMessage && chatId) {
+      const repliedMessageId = replyToMessage.message_id;
+      try {
+        const storedMessage = getMessageByChatAndMessageId(database, chatId, repliedMessageId);
+        if (storedMessage?.text?.trim()) {
+          messageToRoast = storedMessage.text.trim();
+          authorId = storedMessage.from_id ?? undefined;
+          authorName =
+            formatDisplayName([storedMessage.from_first_name, storedMessage.from_last_name]) ??
+            storedMessage.from_username;
+          replyTargetId = repliedMessageId;
+        }
+      } catch (dbError) {
+        console.error('Failed to retrieve message from database for /roast:', dbError);
+        await notifyError('Failed to retrieve message from database for /roast command', dbError);
+      }
+
+      if (!messageToRoast) {
+        const replied = replyToMessage;
+        const repliedText =
+          'text' in replied && typeof replied.text === 'string'
+            ? replied.text
+            : 'caption' in replied && typeof replied.caption === 'string'
+              ? replied.caption
+              : undefined;
+        if (repliedText?.trim()) {
+          messageToRoast = repliedText.trim();
+          replyTargetId = repliedMessageId;
+        }
+        if ('from' in replied && replied.from) {
+          authorId = replied.from.id;
+          if (!authorName) {
+            authorName =
+              formatDisplayName([replied.from.first_name, replied.from.last_name]) ??
+              replied.from.username ??
+              undefined;
+          }
+        }
+      }
+    }
+
+    if (!messageToRoast && directArgument) {
+      messageToRoast = directArgument;
+    }
+
+    if (!messageToRoast) {
+      await ctx.reply('Por favor, responde a un mensaje o agrega el argumento después de /roast.');
+      return;
+    }
+
+    if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
+      await ctx.reply(
+        '😇 Este sabio infalible nunca se equivoca, así que no puedo rostizar sus mensajes por respeto a su legendaria sabiduría. ✨'
+      );
+      return;
+    }
+
+    const stopTyping = startTypingIndicator(ctx);
+    try {
+      const { text } = await roastMessageContent(messageToRoast, {
+        authorName,
+        chatTitle:
+          'title' in ctx.chat && typeof ctx.chat.title === 'string'
+            ? ctx.chat.title
+            : 'username' in ctx.chat
+              ? ctx.chat.username
+              : undefined,
+      });
+
+      if (text) {
+        await replyWithLLMMessage(
+          ctx,
+          database,
+          text,
+          replyTargetId ? { replyToMessageId: replyTargetId } : undefined
+        );
+      } else {
+        await ctx.reply('No se obtuvo una respuesta válida del modelo. Intenta nuevamente más tarde.');
+      }
+    } finally {
+      stopTyping();
+    }
+  } catch (error) {
+    console.error('Failed to process /roast command:', error);
+    await notifyError(`Failed to process /roast command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
+    try {
+      await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
+    } catch (replyError) {
+      console.error('Failed to send /roast error message:', replyError);
+      await notifyError('Failed to send /roast error message', replyError);
     }
   }
 });
