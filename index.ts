@@ -1,21 +1,21 @@
 import { config } from 'dotenv';
 import { Bot } from 'grammy';
 import { askHandler } from './services/ask';
+import { createChannelLogger, formatDisplayName } from './services/channel-logs';
+import { detectMessageFallacies } from './services/fallacy-detector';
+import { replyWithLLMMessage } from './services/reply';
+import { roastMessageContent } from './services/roast';
+import { buildSourcesMessage } from './services/sources';
 import {
   buildTelegramMessageRecord,
-  getMessagesByChat,
   getMessageByChatAndMessageId,
+  getMessagesByChat,
   initializeDatabase,
   mapToTelegramRawMessage,
   storeTelegramMessage,
 } from './services/sqlite';
-import { verifyMessageContent } from './services/verify';
-import { detectMessageFallacies } from './services/fallacy-detector';
-import { roastMessageContent } from './services/roast';
-import { replyWithLLMMessage } from './services/reply';
-import { buildSourcesMessage } from './services/sources';
 import { startTypingIndicator } from './services/typing-indicator';
-import { createChannelLogger, formatChatLabel, formatDisplayName, formatUserLabel } from './services/channel-logs';
+import { verifyMessageContent } from './services/verify';
 
 config();
 
