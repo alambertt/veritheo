@@ -27,12 +27,37 @@ if (!token) {
 const bot = new Bot(token);
 const database = initializeDatabase();
 const UNTOUCHABLE_USER_IDS = [738668189, 929608851, 8313981495];
+const BANNED_USER_IDS: number[] = [557332305];
 const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ?? undefined;
 
 const GENERIC_ERROR_MESSAGE =
   'Lo siento, ha ocurrido un error mientras procesaba tu solicitud. Por favor, inténtalo de nuevo más tarde.';
+const BANNED_COMMAND_MESSAGE = 'No tienes permisos para usar los comandos de este bot.';
 
 const { sendChannelLog, notifyError, logCommandInvocation } = createChannelLogger(token, CHANNEL_LOGS_ID);
+
+const isCommandMessage = (text?: string, entities?: { type: string; offset: number; length: number }[]) => {
+  if (!text || !entities) {
+    return false;
+  }
+  return entities.some(entity => entity.type === 'bot_command' && entity.offset === 0);
+};
+
+bot.use(async (ctx, next) => {
+  const message = ctx.message;
+  if (!message) {
+    return next();
+  }
+
+  if (message.from?.id && BANNED_USER_IDS.includes(message.from.id)) {
+    if (isCommandMessage(message.text, message.entities)) {
+      await ctx.reply(BANNED_COMMAND_MESSAGE);
+      return;
+    }
+  }
+
+  await next();
+});
 
 bot.command('start', ctx => {
   logCommandInvocation(ctx, '/start');
