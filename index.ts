@@ -14,6 +14,7 @@ import {
   mapToTelegramRawMessage,
   storeTelegramMessage,
 } from './services/sqlite';
+import { findSimilarBotMessageInChat } from './services/self-message-guard';
 import { startTypingIndicator } from './services/typing-indicator';
 import { verifyMessageContent } from './services/verify';
 

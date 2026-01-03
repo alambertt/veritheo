@@ -196,6 +196,7 @@ export function storeTelegramMessage(db: Database, message: TelegramMessageRecor
 export interface MessageQueryOptions {
   chatId?: number;
   fromId?: number;
+  fromIsBot?: boolean;
   textLike?: string;
   sinceDate?: number;
   untilDate?: number;
@@ -272,6 +273,11 @@ export function queryMessages(db: Database, criteria: MessageQueryOptions = {}):
   if (criteria.fromId !== undefined) {
     conditions.push('from_id = $from_id');
     params.$from_id = criteria.fromId;
+  }
+
+  if (criteria.fromIsBot !== undefined) {
+    conditions.push('from_is_bot = $from_is_bot');
+    params.$from_is_bot = criteria.fromIsBot ? 1 : 0;
   }
 
   if (criteria.textLike) {
