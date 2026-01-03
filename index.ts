@@ -24,10 +24,50 @@ if (!token) {
   throw new Error('TELEGRAM_BOT_TOKEN environment variable is not set');
 }
 
+const parseUserIdListEnv = (name: string): number[] => {
+  const raw = process.env[name];
+  if (!raw || raw.trim() === '') {
+    return [];
+  }
+
+  const parts = raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean);
+
+  const ids = parts.map(part => {
+    const parsed = Number(part);
+    if (!Number.isSafeInteger(parsed)) {
+      throw new Error(`Invalid ${name} environment variable: "${part}" is not an integer user id`);
+    }
+    return parsed;
+  });
+
+  return Array.from(new Set(ids));
+};
+
+const parseUserIdEnv = (name: string): number | undefined => {
+  const raw = process.env[name];
+  if (!raw || raw.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(raw.trim());
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`Invalid ${name} environment variable: "${raw}" is not an integer user id`);
+  }
+  return parsed;
+};
+
 const bot = new Bot(token);
 const database = initializeDatabase();
-const UNTOUCHABLE_USER_IDS = [738668189, 929608851, 8313981495];
-const BANNED_USER_IDS: number[] = [557332305];
+const DEFAULT_UNTOUCHABLE_USER_IDS: number[] = [];
+const configuredUntouchableUserIds = parseUserIdListEnv('UNTOUCHABLE_USER_IDS');
+const UNTOUCHABLE_USER_IDS =
+  configuredUntouchableUserIds.length > 0 ? configuredUntouchableUserIds : DEFAULT_UNTOUCHABLE_USER_IDS;
+const configuredBannedUserId = parseUserIdEnv('BANNED_USER_ID');
+const BANNED_USER_IDS = Array.from(
+  new Set([...parseUserIdListEnv('BANNED_USER_IDS'), ...(configuredBannedUserId ? [configuredBannedUserId] : [])])
+);
 const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ?? undefined;
 
 const GENERIC_ERROR_MESSAGE =
