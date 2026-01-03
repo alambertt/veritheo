@@ -11,6 +11,42 @@ function normalizeForSimilarity(text: string): string {
     .trim();
 }
 
+function wordNgrams(tokens: string[], n: number): string[] {
+  if (n <= 0 || tokens.length < n) {
+    return [];
+  }
+  const grams: string[] = [];
+  for (let index = 0; index <= tokens.length - n; index++) {
+    grams.push(tokens.slice(index, index + n).join('\u0001'));
+  }
+  return grams;
+}
+
+function containmentCoefficient(promptText: string, candidateText: string, n = 5): number {
+  if (!promptText || !candidateText) {
+    return 0;
+  }
+  if (promptText === candidateText) {
+    return 1;
+  }
+
+  const promptTokens = promptText.split(' ').filter(Boolean);
+  const candidateTokens = candidateText.split(' ').filter(Boolean);
+  const promptNgrams = wordNgrams(promptTokens, n);
+  if (promptNgrams.length === 0) {
+    return 0;
+  }
+
+  const candidateSet = new Set(wordNgrams(candidateTokens, n));
+  let hits = 0;
+  for (const gram of promptNgrams) {
+    if (candidateSet.has(gram)) {
+      hits++;
+    }
+  }
+  return hits / promptNgrams.length;
+}
+
 function trigramCounts(text: string): Map<string, number> {
   const counts = new Map<string, number>();
   if (text.length < 3) {
@@ -62,16 +98,32 @@ export function findSimilarBotMessageInChat(
   db: Database,
   chatId: number,
   promptText: string,
-  options: { threshold?: number; pageSize?: number; maxMessagesToScan?: number } = {}
+  options: {
+    threshold?: number;
+    pageSize?: number;
+    maxMessagesToScan?: number;
+    containmentThreshold?: number;
+    minPromptCharsForSubstring?: number;
+    minPromptTokensForContainment?: number;
+    containmentNgramSize?: number;
+  } = {}
 ): { blocked: boolean; similarity: number; matchedMessageId?: number } {
-  const threshold = options.threshold ?? 0.70;
+  const threshold = options.threshold ?? 0.85;
+  const containmentThreshold = options.containmentThreshold ?? threshold;
+  const minPromptCharsForSubstring = options.minPromptCharsForSubstring ?? 40;
+  const minPromptTokensForContainment = options.minPromptTokensForContainment ?? 8;
   const pageSize = options.pageSize ?? 200;
-  const maxMessagesToScan = options.maxMessagesToScan ?? 500;
+  const maxMessagesToScan = options.maxMessagesToScan ?? 2000;
   const normalizedPrompt = normalizeForSimilarity(promptText);
 
   if (!normalizedPrompt) {
     return { blocked: false, similarity: 0 };
   }
+
+  const promptTokens = normalizedPrompt.split(' ').filter(Boolean);
+  const containmentNgramSize =
+    options.containmentNgramSize ??
+    (promptTokens.length >= 20 ? 5 : promptTokens.length >= 12 ? 4 : 3);
 
   let bestSimilarity = 0;
   let bestMessageId: number | undefined;
@@ -92,6 +144,21 @@ export function findSimilarBotMessageInChat(
       const normalizedCandidate = normalizeForSimilarity(message.text!);
       if (!normalizedCandidate) {
         continue;
+      }
+
+      if (
+        normalizedPrompt.length >= minPromptCharsForSubstring &&
+        normalizedCandidate.length >= normalizedPrompt.length &&
+        normalizedCandidate.includes(normalizedPrompt)
+      ) {
+        return { blocked: true, similarity: 1, matchedMessageId: message.message_id };
+      }
+
+      if (promptTokens.length >= minPromptTokensForContainment) {
+        const containment = containmentCoefficient(normalizedPrompt, normalizedCandidate, containmentNgramSize);
+        if (containment >= containmentThreshold) {
+          return { blocked: true, similarity: containment, matchedMessageId: message.message_id };
+        }
       }
 
       const similarity = diceCoefficient(normalizedPrompt, normalizedCandidate);
