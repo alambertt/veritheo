@@ -278,7 +278,7 @@ bot.command('verify', async ctx => {
       return;
     }
 
-    const botSimilarity = findSimilarBotMessageInChat(database, chatId, messageToVerify, { threshold: 0.85 });
+    const botSimilarity = findSimilarBotMessageInChat(database, chatId, messageToVerify, { threshold: 0.55 });
     if (botSimilarity.blocked) {
       await ctx.reply('Lo siento, no puedo verificar mensajes que yo mismo haya enviado.');
       return;
@@ -484,7 +484,7 @@ bot.command('roast', async ctx => {
     }
 
     if (chatId) {
-      const botSimilarity = findSimilarBotMessageInChat(database, chatId, messageToRoast, { threshold: 0.85 });
+      const botSimilarity = findSimilarBotMessageInChat(database, chatId, messageToRoast, { threshold: 0.51 });
       if (botSimilarity.blocked) {
         await ctx.reply('Lo siento, no puedo rostizar mensajes que yo mismo haya enviado.');
         return;

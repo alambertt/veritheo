@@ -64,7 +64,7 @@ export function findSimilarBotMessageInChat(
   promptText: string,
   options: { threshold?: number; pageSize?: number; maxMessagesToScan?: number } = {}
 ): { blocked: boolean; similarity: number; matchedMessageId?: number } {
-  const threshold = options.threshold ?? 0.85;
+  const threshold = options.threshold ?? 0.70;
   const pageSize = options.pageSize ?? 200;
   const maxMessagesToScan = options.maxMessagesToScan ?? 500;
   const normalizedPrompt = normalizeForSimilarity(promptText);
