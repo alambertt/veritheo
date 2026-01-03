@@ -217,9 +217,7 @@ bot.command('persona', ctx => {
 
 bot.command('verify', async ctx => {
   try {
-    logCommandInvocation(ctx, '/verify', [
-      `ReplyToMessageId: ${ctx.message?.reply_to_message?.message_id ?? 'none'}`,
-    ]);
+    logCommandInvocation(ctx, '/verify', [`ReplyToMessageId: ${ctx.message?.reply_to_message?.message_id ?? 'none'}`]);
     if (!ctx.message?.reply_to_message || !ctx.chat?.id) {
       await ctx.reply('Por favor, responde al mensaje que deseas verificar y luego usa /verify.');
       return;
@@ -232,7 +230,9 @@ bot.command('verify', async ctx => {
     const authorId = ctx.message.reply_to_message.from?.id;
 
     if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
-      await ctx.reply('😇 Este sabio infalible nunca se equivoca, así que no puedo verificar sus mensajes por respeto a su legendaria sabiduría. ✨');
+      await ctx.reply(
+        '😇 Este sabio infalible nunca se equivoca, así que no puedo verificar sus mensajes por respeto a su legendaria sabiduría. ✨'
+      );
       return;
     }
 
@@ -256,8 +256,8 @@ bot.command('verify', async ctx => {
         'text' in replied && typeof replied.text === 'string'
           ? replied.text
           : 'caption' in replied && typeof replied.caption === 'string'
-            ? replied.caption
-            : undefined;
+          ? replied.caption
+          : undefined;
       if (repliedText?.trim()) {
         messageToVerify = repliedText.trim();
       }
@@ -291,8 +291,8 @@ bot.command('verify', async ctx => {
           'title' in ctx.chat && typeof ctx.chat.title === 'string'
             ? ctx.chat.title
             : 'username' in ctx.chat
-              ? ctx.chat.username
-              : undefined,
+            ? ctx.chat.username
+            : undefined,
       });
 
       if (text) {
@@ -351,8 +351,8 @@ bot.command('fallacy_detector', async ctx => {
         'text' in replied && typeof replied.text === 'string'
           ? replied.text
           : 'caption' in replied && typeof replied.caption === 'string'
-            ? replied.caption
-            : undefined;
+          ? replied.caption
+          : undefined;
       if (repliedText?.trim()) {
         messageToAnalyze = repliedText.trim();
       }
@@ -373,7 +373,9 @@ bot.command('fallacy_detector', async ctx => {
     }
 
     if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
-      await ctx.reply('😇 Este sabio infalible nunca se equivoca, así que no puedo analizar sus mensajes por respeto a su legendaria sabiduría. ✨');
+      await ctx.reply(
+        '😇 Este sabio infalible nunca se equivoca, así que no puedo analizar sus mensajes por respeto a su legendaria sabiduría. ✨'
+      );
       return;
     }
 
@@ -385,8 +387,8 @@ bot.command('fallacy_detector', async ctx => {
           'title' in ctx.chat && typeof ctx.chat.title === 'string'
             ? ctx.chat.title
             : 'username' in ctx.chat
-              ? ctx.chat.username
-              : undefined,
+            ? ctx.chat.username
+            : undefined,
       });
 
       if (text) {
@@ -449,8 +451,8 @@ bot.command('roast', async ctx => {
           'text' in replied && typeof replied.text === 'string'
             ? replied.text
             : 'caption' in replied && typeof replied.caption === 'string'
-              ? replied.caption
-              : undefined;
+            ? replied.caption
+            : undefined;
         if (repliedText?.trim()) {
           messageToRoast = repliedText.trim();
           replyTargetId = repliedMessageId;
@@ -503,17 +505,12 @@ bot.command('roast', async ctx => {
           'title' in ctx.chat && typeof ctx.chat.title === 'string'
             ? ctx.chat.title
             : 'username' in ctx.chat
-              ? ctx.chat.username
-              : undefined,
+            ? ctx.chat.username
+            : undefined,
       });
 
       if (text) {
-        await replyWithLLMMessage(
-          ctx,
-          database,
-          text,
-          replyTargetId ? { replyToMessageId: replyTargetId } : undefined
-        );
+        await replyWithLLMMessage(ctx, database, text, replyTargetId ? { replyToMessageId: replyTargetId } : undefined);
       } else {
         await ctx.reply('No se obtuvo una respuesta válida del modelo. Intenta nuevamente más tarde.');
       }
