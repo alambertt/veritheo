@@ -273,7 +273,16 @@ bot.command('verify', async ctx => {
       );
       return;
     }
+    if (ctx.message.reply_to_message.from?.is_bot) {
+      await ctx.reply('Lo siento, no puedo verificar mensajes que yo mismo haya enviado.');
+      return;
+    }
 
+    const botSimilarity = findSimilarBotMessageInChat(database, chatId, messageToVerify, { threshold: 0.85 });
+    if (botSimilarity.blocked) {
+      await ctx.reply('Lo siento, no puedo verificar mensajes que yo mismo haya enviado.');
+      return;
+    }
     const stopTyping = startTypingIndicator(ctx);
     try {
       const { text } = await verifyMessageContent(messageToVerify, {
@@ -467,6 +476,18 @@ bot.command('roast', async ctx => {
       return;
     }
 
+    if (replyToMessage?.from?.is_bot) {
+      await ctx.reply('Lo siento, no puedo rostizar mensajes que yo mismo haya enviado.');
+      return;
+    }
+
+    if (chatId) {
+      const botSimilarity = findSimilarBotMessageInChat(database, chatId, messageToRoast, { threshold: 0.85 });
+      if (botSimilarity.blocked) {
+        await ctx.reply('Lo siento, no puedo rostizar mensajes que yo mismo haya enviado.');
+        return;
+      }
+    }
     if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
       await ctx.reply(
         '😇 Este sabio infalible nunca se equivoca, así que no puedo rostizar sus mensajes por respeto a su legendaria sabiduría. ✨'
