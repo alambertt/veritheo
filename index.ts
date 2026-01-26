@@ -17,6 +17,7 @@ import {
 import { findSimilarBotMessageInChat } from './services/self-message-guard';
 import { startTypingIndicator } from './services/typing-indicator';
 import { verifyMessageContent } from './services/verify';
+import { SIMILARITY_THRESHOLD } from './constants';
 
 config();
 
@@ -67,7 +68,7 @@ const UNTOUCHABLE_USER_IDS =
   configuredUntouchableUserIds.length > 0 ? configuredUntouchableUserIds : DEFAULT_UNTOUCHABLE_USER_IDS;
 const configuredBannedUserId = parseUserIdEnv('BANNED_USER_ID');
 const BANNED_USER_IDS = Array.from(
-  new Set([...parseUserIdListEnv('BANNED_USER_IDS'), ...(configuredBannedUserId ? [configuredBannedUserId] : [])])
+  new Set([...parseUserIdListEnv('BANNED_USER_IDS'), ...(configuredBannedUserId ? [configuredBannedUserId] : [])]),
 );
 const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ?? undefined;
 
@@ -103,7 +104,7 @@ bot.use(async (ctx, next) => {
 bot.command('start', ctx => {
   logCommandInvocation(ctx, '/start');
   ctx.reply(
-    'Bienvenido a Veritheo! 🙏 Soy tu asistente teológico. Hazme cualquier pregunta teológica y te ayudaré a explorar las profundidades de la fe y la verdad. Usa /help para más información.'
+    'Bienvenido a Veritheo! 🙏 Soy tu asistente teológico. Hazme cualquier pregunta teológica y te ayudaré a explorar las profundidades de la fe y la verdad. Usa /help para más información.',
   );
 });
 
@@ -206,7 +207,7 @@ Comandos disponibles:
 /roast - Refuta un argumento usando los mejores contraargumentos del espectro teológico contrario
 
 Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orientación.
-  `.trim()
+  `.trim(),
   );
 });
 
@@ -231,7 +232,7 @@ bot.command('verify', async ctx => {
 
     if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
       await ctx.reply(
-        '😇 Este sabio infalible nunca se equivoca, así que no puedo verificar sus mensajes por respeto a su legendaria sabiduría. ✨'
+        '😇 Este sabio infalible nunca se equivoca, así que no puedo verificar sus mensajes por respeto a su legendaria sabiduría. ✨',
       );
       return;
     }
@@ -256,8 +257,8 @@ bot.command('verify', async ctx => {
         'text' in replied && typeof replied.text === 'string'
           ? replied.text
           : 'caption' in replied && typeof replied.caption === 'string'
-          ? replied.caption
-          : undefined;
+            ? replied.caption
+            : undefined;
       if (repliedText?.trim()) {
         messageToVerify = repliedText.trim();
       }
@@ -269,7 +270,7 @@ bot.command('verify', async ctx => {
 
     if (!messageToVerify) {
       await ctx.reply(
-        'No pude encontrar el contenido del mensaje original. Asegúrate de responder a un mensaje de texto antes de usar /verify.'
+        'No pude encontrar el contenido del mensaje original. Asegúrate de responder a un mensaje de texto antes de usar /verify.',
       );
       return;
     }
@@ -278,7 +279,9 @@ bot.command('verify', async ctx => {
       return;
     }
 
-    const botSimilarity = findSimilarBotMessageInChat(database, chatId, messageToVerify, { threshold: 0.55 });
+    const botSimilarity = findSimilarBotMessageInChat(database, chatId, messageToVerify, {
+      threshold: SIMILARITY_THRESHOLD,
+    });
     if (botSimilarity.blocked) {
       await ctx.reply('Lo siento, no puedo verificar mensajes que yo mismo haya enviado.');
       return;
@@ -291,8 +294,8 @@ bot.command('verify', async ctx => {
           'title' in ctx.chat && typeof ctx.chat.title === 'string'
             ? ctx.chat.title
             : 'username' in ctx.chat
-            ? ctx.chat.username
-            : undefined,
+              ? ctx.chat.username
+              : undefined,
       });
 
       if (text) {
@@ -351,8 +354,8 @@ bot.command('fallacy_detector', async ctx => {
         'text' in replied && typeof replied.text === 'string'
           ? replied.text
           : 'caption' in replied && typeof replied.caption === 'string'
-          ? replied.caption
-          : undefined;
+            ? replied.caption
+            : undefined;
       if (repliedText?.trim()) {
         messageToAnalyze = repliedText.trim();
       }
@@ -367,14 +370,14 @@ bot.command('fallacy_detector', async ctx => {
 
     if (!messageToAnalyze) {
       await ctx.reply(
-        'No pude encontrar el contenido del mensaje original. Asegúrate de responder a un mensaje de texto antes de usar /fallacy_detector.'
+        'No pude encontrar el contenido del mensaje original. Asegúrate de responder a un mensaje de texto antes de usar /fallacy_detector.',
       );
       return;
     }
 
     if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
       await ctx.reply(
-        '😇 Este sabio infalible nunca se equivoca, así que no puedo analizar sus mensajes por respeto a su legendaria sabiduría. ✨'
+        '😇 Este sabio infalible nunca se equivoca, así que no puedo analizar sus mensajes por respeto a su legendaria sabiduría. ✨',
       );
       return;
     }
@@ -387,8 +390,8 @@ bot.command('fallacy_detector', async ctx => {
           'title' in ctx.chat && typeof ctx.chat.title === 'string'
             ? ctx.chat.title
             : 'username' in ctx.chat
-            ? ctx.chat.username
-            : undefined,
+              ? ctx.chat.username
+              : undefined,
       });
 
       if (text) {
@@ -451,8 +454,8 @@ bot.command('roast', async ctx => {
           'text' in replied && typeof replied.text === 'string'
             ? replied.text
             : 'caption' in replied && typeof replied.caption === 'string'
-            ? replied.caption
-            : undefined;
+              ? replied.caption
+              : undefined;
         if (repliedText?.trim()) {
           messageToRoast = repliedText.trim();
           replyTargetId = repliedMessageId;
@@ -484,7 +487,9 @@ bot.command('roast', async ctx => {
     }
 
     if (chatId) {
-      const botSimilarity = findSimilarBotMessageInChat(database, chatId, messageToRoast, { threshold: 0.51 });
+      const botSimilarity = findSimilarBotMessageInChat(database, chatId, messageToRoast, {
+        threshold: SIMILARITY_THRESHOLD,
+      });
       if (botSimilarity.blocked) {
         await ctx.reply('Lo siento, no puedo rostizar mensajes que yo mismo haya enviado.');
         return;
@@ -492,7 +497,7 @@ bot.command('roast', async ctx => {
     }
     if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
       await ctx.reply(
-        '😇 Este sabio infalible nunca se equivoca, así que no puedo rostizar sus mensajes por respeto a su legendaria sabiduría. ✨'
+        '😇 Este sabio infalible nunca se equivoca, así que no puedo rostizar sus mensajes por respeto a su legendaria sabiduría. ✨',
       );
       return;
     }
@@ -505,8 +510,8 @@ bot.command('roast', async ctx => {
           'title' in ctx.chat && typeof ctx.chat.title === 'string'
             ? ctx.chat.title
             : 'username' in ctx.chat
-            ? ctx.chat.username
-            : undefined,
+              ? ctx.chat.username
+              : undefined,
       });
 
       if (text) {
