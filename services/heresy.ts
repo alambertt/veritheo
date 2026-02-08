@@ -1,0 +1,42 @@
+import { google } from '@ai-sdk/google';
+import { generateText } from 'ai';
+import { GOOGLE_MODEL_PRO } from '../constants';
+import { heresyPrompt } from '../prompts/heresy';
+
+export interface HeresyOptions {
+  authorName?: string;
+  chatTitle?: string;
+  messages: string[];
+}
+
+export async function detectUserHeresy(options: HeresyOptions) {
+  const contextLines: string[] = [];
+  if (options.authorName) {
+    contextLines.push(`Autor o remitente: ${options.authorName}`);
+  }
+  if (options.chatTitle) {
+    contextLines.push(`Conversacion: ${options.chatTitle}`);
+  }
+
+  const messagesBlock = options.messages.map(message => `- ${message}`).join('\n');
+
+  const userContent = [
+    'Analiza los mensajes y determina la herejía histórica cuya energía más se alinea con el usuario.',
+    'Sigue estrictamente las instrucciones del sistema.',
+    contextLines.length ? contextLines.join('\n') : null,
+    '---',
+    'Mensajes del usuario:',
+    messagesBlock,
+    '---',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const { text } = await generateText({
+    model: google(GOOGLE_MODEL_PRO),
+    system: heresyPrompt,
+    messages: [{ role: 'user', content: userContent }],
+  });
+
+  return { text };
+}
