@@ -3,6 +3,7 @@ import { Bot } from 'grammy';
 import { askHandler } from './services/ask';
 import { createChannelLogger, formatDisplayName } from './services/channel-logs';
 import { detectMessageFallacies } from './services/fallacy-detector';
+import { detectUserHeresy } from './services/heresy';
 import { replyWithLLMMessage } from './services/reply';
 import { roastMessageContent } from './services/roast';
 import { buildSourcesMessage } from './services/sources';
@@ -10,8 +11,11 @@ import {
   buildTelegramMessageRecord,
   getMessageByChatAndMessageId,
   getMessagesByChat,
+  getHeresyCacheEntry,
+  getUserMessagesForHeresy,
   initializeDatabase,
   mapToTelegramRawMessage,
+  storeHeresyCacheEntry,
   storeTelegramMessage,
 } from './services/sqlite';
 import { findSimilarBotMessageInChat } from './services/self-message-guard';
@@ -75,6 +79,10 @@ const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ?? undefined;
 const GENERIC_ERROR_MESSAGE =
   'Lo siento, ha ocurrido un error mientras procesaba tu solicitud. Por favor, inténtalo de nuevo más tarde.';
 const BANNED_COMMAND_MESSAGE = 'No tienes permisos para usar los comandos de este bot.';
+const HERESY_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
+const HERESY_LOOKBACK_SECONDS = 90 * 24 * 60 * 60;
+const HERESY_MIN_LENGTH = 100;
+const HERESY_MAX_MESSAGES = 20;
 
 const { sendChannelLog, notifyError, logCommandInvocation } = createChannelLogger(token, CHANNEL_LOGS_ID);
 
@@ -205,6 +213,7 @@ Comandos disponibles:
 /verify - Responde a un mensaje para verificar su contenido y citar posibles errores
 /fallacy_detector - Analiza un mensaje en busca de falacias argumentativas
 /roast - Refuta un argumento usando los mejores contraargumentos del espectro teológico contrario
+/my_heresy - Descubre tu herejía histórica según tus mensajes en el grupo
 
 Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orientación.
   `.trim(),
@@ -530,6 +539,126 @@ bot.command('roast', async ctx => {
     } catch (replyError) {
       console.error('Failed to send /roast error message:', replyError);
       await notifyError('Failed to send /roast error message', replyError);
+    }
+  }
+});
+
+bot.command('my_heresy', async ctx => {
+  try {
+    const replyToMessage = ctx.message?.reply_to_message;
+    const chatId = ctx.chat?.id;
+    const chatType = ctx.chat?.type;
+    const replyToId = replyToMessage?.message_id;
+
+    logCommandInvocation(ctx, '/my_heresy', [`ReplyToMessageId: ${replyToId ?? 'none'}`]);
+
+    if (!chatId || !chatType || chatType === 'private') {
+      await ctx.reply('Este comando está pensado para grupos. Úsalo en un chat grupal respondiendo a un mensaje.');
+      return;
+    }
+
+    if (!replyToMessage) {
+      await ctx.reply('Responde a un mensaje del usuario para descubrir su herejía histórica.');
+      return;
+    }
+
+    if (replyToMessage.from?.is_bot) {
+      await ctx.reply('Lo siento, no puedo evaluar la herejía de mensajes enviados por bots.');
+      return;
+    }
+
+    let authorId: number | undefined;
+    let authorName: string | undefined;
+
+    try {
+      const storedMessage = getMessageByChatAndMessageId(database, chatId, replyToId ?? 0);
+      if (storedMessage) {
+        authorId = storedMessage.from_id ?? undefined;
+        authorName =
+          formatDisplayName([storedMessage.from_first_name, storedMessage.from_last_name]) ??
+          storedMessage.from_username ??
+          undefined;
+      }
+    } catch (dbError) {
+      console.error('Failed to retrieve message from database for /my_heresy:', dbError);
+      await notifyError('Failed to retrieve message from database for /my_heresy command', dbError);
+    }
+
+    if (!authorId && replyToMessage.from) {
+      authorId = replyToMessage.from.id;
+      authorName =
+        authorName ??
+        formatDisplayName([replyToMessage.from.first_name, replyToMessage.from.last_name]) ??
+        replyToMessage.from.username ??
+        undefined;
+    }
+
+    if (!authorId) {
+      await ctx.reply('No pude identificar al usuario. Responde a un mensaje válido e intenta de nuevo.');
+      return;
+    }
+
+    if (UNTOUCHABLE_USER_IDS.includes(authorId)) {
+      await ctx.reply(
+        '😇 Este sabio infalible está más allá de las herejías terrenales. Mejor solo admirarlo desde lejos. ✨',
+      );
+      return;
+    }
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const cached = getHeresyCacheEntry(database, chatId, authorId);
+    if (cached && nowSeconds - cached.created_at < HERESY_CACHE_TTL_SECONDS) {
+      await replyWithLLMMessage(ctx, database, cached.response, { replyToMessageId: replyToId });
+      return;
+    }
+
+    const sinceDate = nowSeconds - HERESY_LOOKBACK_SECONDS;
+    const recentMessages = getUserMessagesForHeresy(database, chatId, authorId, sinceDate, {
+      limit: HERESY_MAX_MESSAGES,
+      minLength: HERESY_MIN_LENGTH,
+    });
+
+    const messageTexts = recentMessages
+      .map(message => message.text?.trim())
+      .filter((text): text is string => Boolean(text && text.length > HERESY_MIN_LENGTH));
+
+    if (messageTexts.length === 0) {
+      await ctx.reply(
+        'No encontré suficientes mensajes largos de los últimos tres meses para ese usuario. Necesito más material de herejía.',
+      );
+      return;
+    }
+
+    const stopTyping = startTypingIndicator(ctx);
+    try {
+      const { text } = await detectUserHeresy({
+        authorName,
+        chatTitle: ctx.chat.title,
+        messages: messageTexts,
+      });
+
+      if (text) {
+        await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
+        storeHeresyCacheEntry(database, {
+          chat_id: chatId,
+          user_id: authorId,
+          created_at: nowSeconds,
+          response: text,
+        });
+      } else {
+        await ctx.reply('No se obtuvo una respuesta válida del modelo. Intenta nuevamente más tarde.');
+      }
+    } finally {
+      stopTyping();
+    }
+  } catch (error) {
+    console.error('Failed to process /my_heresy command:', error);
+    await notifyError(`Failed to process /my_heresy command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
+    try {
+      await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
+    } catch (replyError) {
+      console.error('Failed to send /my_heresy error message:', replyError);
+      await notifyError('Failed to send /my_heresy error message', replyError);
     }
   }
 });

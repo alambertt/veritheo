@@ -22,6 +22,21 @@ const CREATE_MESSAGES_TABLE = `
   );
 `;
 
+const CREATE_HERESY_CACHE_TABLE = `
+  CREATE TABLE IF NOT EXISTS heresy_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    response TEXT NOT NULL
+  );
+`;
+
+const CREATE_HERESY_CACHE_INDEX = `
+  CREATE INDEX IF NOT EXISTS idx_heresy_cache_chat_user
+    ON heresy_cache (chat_id, user_id, created_at);
+`;
+
 let insertMessageStatement: Statement | undefined;
 
 export function initializeDatabase(readonly = false): Database {
@@ -39,6 +54,8 @@ export function initializeDatabase(readonly = false): Database {
 
 export function setupSchema(db: Database) {
   db.run(CREATE_MESSAGES_TABLE);
+  db.run(CREATE_HERESY_CACHE_TABLE);
+  db.run(CREATE_HERESY_CACHE_INDEX);
 }
 
 export type TelegramRawMessage = {
@@ -79,6 +96,14 @@ export interface TelegramMessageRecord {
 
 export interface StoredTelegramMessage extends TelegramMessageRecord {
   id: number;
+}
+
+export interface HeresyCacheEntry {
+  id: number;
+  chat_id: number;
+  user_id: number;
+  created_at: number;
+  response: string;
 }
 
 function mapChat(chat: Chat): TelegramRawMessage['chat'] {
@@ -259,6 +284,103 @@ export function getMessagesByChat(
   });
 
   return rows.map(mapStoredMessageRow);
+}
+
+export function getUserMessagesForHeresy(
+  db: Database,
+  chatId: number,
+  userId: number,
+  sinceDate: number,
+  options: { limit?: number; minLength?: number } = {}
+): StoredTelegramMessage[] {
+  const limit = options.limit ?? 50;
+  const minLength = options.minLength ?? 100;
+
+  const query = db.query(
+    `
+      SELECT *
+      FROM messages
+      WHERE chat_id = $chat_id
+        AND from_id = $from_id
+        AND date >= $since_date
+        AND text IS NOT NULL
+        AND LENGTH(text) > $min_length
+        AND (from_is_bot IS NULL OR from_is_bot = 0)
+      ORDER BY date DESC
+      LIMIT $limit
+    `
+  );
+
+  const rows = query.all({
+    $chat_id: chatId,
+    $from_id: userId,
+    $since_date: sinceDate,
+    $min_length: minLength,
+    $limit: limit,
+  });
+
+  return rows.map(mapStoredMessageRow);
+}
+
+export function getHeresyCacheEntry(
+  db: Database,
+  chatId: number,
+  userId: number
+): HeresyCacheEntry | undefined {
+  const query = db.query(
+    `
+      SELECT *
+      FROM heresy_cache
+      WHERE chat_id = $chat_id AND user_id = $user_id
+      ORDER BY created_at DESC
+      LIMIT 1
+    `
+  );
+
+  const row = query.get({
+    $chat_id: chatId,
+    $user_id: userId,
+  });
+
+  if (!row) {
+    return undefined;
+  }
+
+  return {
+    id: row.id,
+    chat_id: row.chat_id,
+    user_id: row.user_id,
+    created_at: row.created_at,
+    response: row.response,
+  };
+}
+
+export function storeHeresyCacheEntry(
+  db: Database,
+  entry: Omit<HeresyCacheEntry, 'id'>
+): void {
+  const query = db.query(
+    `
+      INSERT INTO heresy_cache (
+        chat_id,
+        user_id,
+        created_at,
+        response
+      ) VALUES (
+        $chat_id,
+        $user_id,
+        $created_at,
+        $response
+      )
+    `
+  );
+
+  query.run({
+    $chat_id: entry.chat_id,
+    $user_id: entry.user_id,
+    $created_at: entry.created_at,
+    $response: entry.response,
+  });
 }
 
 export function queryMessages(db: Database, criteria: MessageQueryOptions = {}): StoredTelegramMessage[] {
