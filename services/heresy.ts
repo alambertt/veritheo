@@ -15,13 +15,13 @@ export async function detectUserHeresy(options: HeresyOptions) {
     contextLines.push(`Autor o remitente: ${options.authorName}`);
   }
   if (options.chatTitle) {
-    contextLines.push(`Conversacion: ${options.chatTitle}`);
+    contextLines.push(`Conversación: ${options.chatTitle}`);
   }
 
   const messagesBlock = options.messages.map(message => `- ${message}`).join('\n');
 
   const userContent = [
-    'Analiza los mensajes y determina la herejía histórica cuya energía más se alinea con el usuario.',
+    'Analiza los mensajes y determina la herejía histórica cuyo espíritu más se alinea con el usuario.',
     'Sigue estrictamente las instrucciones del sistema.',
     contextLines.length ? contextLines.join('\n') : null,
     '---',

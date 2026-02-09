@@ -633,12 +633,7 @@ bot.command('my_heresy', async ctx => {
     try {
       const { text } = await detectUserHeresy({
         authorName,
-        chatTitle:
-          'title' in ctx.chat && typeof ctx.chat.title === 'string'
-            ? ctx.chat.title
-            : 'username' in ctx.chat
-              ? ctx.chat.username
-              : undefined,
+        chatTitle: ctx.chat.title,
         messages: messageTexts,
       });
 
