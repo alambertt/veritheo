@@ -1,6 +1,6 @@
-import { google } from '@ai-sdk/google';
+import { xai } from '@ai-sdk/xai';
 import { generateText } from 'ai';
-import { GOOGLE_MODEL_PRO } from '../constants';
+import { GROK_MODEL } from '../constants';
 import { heresyPrompt } from '../prompts/heresy';
 
 export interface HeresyOptions {
@@ -33,8 +33,13 @@ export async function detectUserHeresy(options: HeresyOptions) {
     .join('\n');
 
   const { text } = await generateText({
-    model: google(GOOGLE_MODEL_PRO),
+    model: xai.responses(GROK_MODEL),
     system: heresyPrompt,
+    providerOptions: {
+      xai: {
+        reasoningEffort: 'medium',
+      },
+    },
     messages: [{ role: 'user', content: userContent }],
   });
 
