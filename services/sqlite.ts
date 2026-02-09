@@ -306,7 +306,7 @@ export function getUserMessagesForHeresy(
         AND text IS NOT NULL
         AND LENGTH(text) > $min_length
         AND (from_is_bot IS NULL OR from_is_bot = 0)
-      ORDER BY date DESC
+      ORDER BY LENGTH(text) DESC
       LIMIT $limit
     `
   );
@@ -319,7 +319,9 @@ export function getUserMessagesForHeresy(
     $limit: limit,
   });
 
-  return rows.map(mapStoredMessageRow);
+  const mapped = rows.map(mapStoredMessageRow);
+  mapped.sort((a, b) => a.date - b.date);
+  return mapped;
 }
 
 export function getHeresyCacheEntry(
@@ -337,7 +339,7 @@ export function getHeresyCacheEntry(
     `
   );
 
-  const row = query.get({
+  const row: any = query.get({
     $chat_id: chatId,
     $user_id: userId,
   });

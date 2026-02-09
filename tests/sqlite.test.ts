@@ -318,6 +318,100 @@ describe('sqlite message storage', () => {
       const results = getUserMessagesForHeresy(db, chatId, userId, sinceDate);
       expect(results).toHaveLength(0);
     });
+
+    it('selects the longest messages, not the most recent', () => {
+      const chatId = 104;
+      const userId = 204;
+      const sinceDate = 1_700_000_000;
+
+      // Short-ish message (most recent)
+      storeTelegramMessage(
+        db,
+        buildTelegramMessageRecord({
+          message_id: 400,
+          chat: { id: chatId, type: 'group' },
+          from: { id: userId, is_bot: false, first_name: 'Human' },
+          date: sinceDate + 300,
+          text: 'E'.repeat(120),
+        }),
+      );
+
+      // Longest message (oldest)
+      storeTelegramMessage(
+        db,
+        buildTelegramMessageRecord({
+          message_id: 401,
+          chat: { id: chatId, type: 'group' },
+          from: { id: userId, is_bot: false, first_name: 'Human' },
+          date: sinceDate + 100,
+          text: 'F'.repeat(500),
+        }),
+      );
+
+      // Medium message
+      storeTelegramMessage(
+        db,
+        buildTelegramMessageRecord({
+          message_id: 402,
+          chat: { id: chatId, type: 'group' },
+          from: { id: userId, is_bot: false, first_name: 'Human' },
+          date: sinceDate + 200,
+          text: 'G'.repeat(300),
+        }),
+      );
+
+      const results = getUserMessagesForHeresy(db, chatId, userId, sinceDate, { limit: 2 });
+      expect(results).toHaveLength(2);
+      // Should pick the two longest (500 and 300), not the most recent
+      expect(results.map(r => r.message_id)).toEqual([401, 402]);
+    });
+
+    it('returns results in chronological order (oldest first)', () => {
+      const chatId = 105;
+      const userId = 205;
+      const sinceDate = 1_700_000_000;
+
+      // Insert messages with varying lengths and dates
+      storeTelegramMessage(
+        db,
+        buildTelegramMessageRecord({
+          message_id: 500,
+          chat: { id: chatId, type: 'group' },
+          from: { id: userId, is_bot: false, first_name: 'Human' },
+          date: sinceDate + 300,
+          text: 'H'.repeat(400),
+        }),
+      );
+
+      storeTelegramMessage(
+        db,
+        buildTelegramMessageRecord({
+          message_id: 501,
+          chat: { id: chatId, type: 'group' },
+          from: { id: userId, is_bot: false, first_name: 'Human' },
+          date: sinceDate + 100,
+          text: 'I'.repeat(200),
+        }),
+      );
+
+      storeTelegramMessage(
+        db,
+        buildTelegramMessageRecord({
+          message_id: 502,
+          chat: { id: chatId, type: 'group' },
+          from: { id: userId, is_bot: false, first_name: 'Human' },
+          date: sinceDate + 200,
+          text: 'J'.repeat(300),
+        }),
+      );
+
+      const results = getUserMessagesForHeresy(db, chatId, userId, sinceDate);
+      expect(results).toHaveLength(3);
+      // Should be sorted by date ascending
+      expect(results[0]?.date).toBe(sinceDate + 100);
+      expect(results[1]?.date).toBe(sinceDate + 200);
+      expect(results[2]?.date).toBe(sinceDate + 300);
+    });
   });
 
   describe('heresy cache', () => {

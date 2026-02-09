@@ -80,7 +80,7 @@ const GENERIC_ERROR_MESSAGE =
   'Lo siento, ha ocurrido un error mientras procesaba tu solicitud. Por favor, inténtalo de nuevo más tarde.';
 const BANNED_COMMAND_MESSAGE = 'No tienes permisos para usar los comandos de este bot.';
 const HERESY_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
-const HERESY_LOOKBACK_SECONDS = 90 * 24 * 60 * 60;
+const HERESY_LOOKBACK_SECONDS = 365 * 24 * 60 * 60;
 const HERESY_MIN_LENGTH = 100;
 const HERESY_MAX_MESSAGES = 20;
 
@@ -624,7 +624,7 @@ bot.command('my_heresy', async ctx => {
 
     if (messageTexts.length === 0) {
       await ctx.reply(
-        'No encontré suficientes mensajes largos de los últimos tres meses para ese usuario. Necesito más material de herejía.',
+        'No encontré suficientes mensajes largos del último año para ese usuario. Necesito más material de herejía.',
       );
       return;
     }

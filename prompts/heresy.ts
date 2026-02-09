@@ -10,8 +10,8 @@ Instrucciones:
 - Evita declaraciones difamatorias; todo es un juego humorístico.
 - Termina con una invitación ligera a debatir o reírse.
 
-Formato sugerido:
-1) Nombre de la herejía + apodo divertido.
-2) "Espíritu detectado" con 2-3 razones.
-3) Cierre gracioso en una sola línea.
+Formato de respuesta:
+- Responde en un solo párrafo continuo, sin numerar secciones ni usar encabezados.
+- Puedes usar **negrita** o *cursiva* si lo consideras oportuno, pero nada más de markdown.
+- El párrafo debe incluir el nombre de la herejía, por qué encaja con el usuario, y un cierre gracioso.
 `.trim();
