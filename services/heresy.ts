@@ -35,11 +35,6 @@ export async function detectUserHeresy(options: HeresyOptions) {
   const { text } = await generateText({
     model: xai.responses(GROK_MODEL),
     system: heresyPrompt,
-    providerOptions: {
-      xai: {
-        reasoningEffort: 'medium',
-      },
-    },
     messages: [{ role: 'user', content: userContent }],
   });
 
