@@ -131,7 +131,7 @@ describe('AI-backed services', () => {
       await detectUserHeresy({ messages: ['Texto'] });
 
       const lastCall = calls.at(-1) as any;
-      expect(lastCall.system).toContain('herejía histórica');
+      expect(lastCall.system).toContain('herejía antigua o medieval');
     });
 
     it('formats multiple messages as a bullet list', async () => {
