@@ -29,6 +29,7 @@ mock.module('@ai-sdk/google', () => ({
 
 import { askHandler } from '../services/ask';
 import { detectMessageFallacies } from '../services/fallacy-detector';
+import { detectUserHeresy } from '../services/heresy';
 import { roastMessageContent } from '../services/roast';
 import { summarizeText } from '../services/summarize';
 import { verifyMessageContent } from '../services/verify';
@@ -89,5 +90,58 @@ describe('AI-backed services', () => {
     const result = await summarizeText(longInput, 5);
 
     expect(result).toBe('abcd…');
+  });
+
+  describe('detectUserHeresy', () => {
+    it('returns the generated text', async () => {
+      generatedText = 'Eres un arriano moderno';
+      const result = await detectUserHeresy({ messages: ['Mensaje de prueba'] });
+
+      expect(result.text).toBe('Eres un arriano moderno');
+    });
+
+    it('includes author name and chat title in the prompt', async () => {
+      await detectUserHeresy({
+        authorName: 'Carlos',
+        chatTitle: 'Teología Geek',
+        messages: ['Primera opinión', 'Segunda opinión'],
+      });
+
+      const lastCall = calls.at(-1) as any;
+      const content = lastCall.messages?.[0]?.content as string;
+
+      expect(content).toContain('Autor o remitente: Carlos');
+      expect(content).toContain('Conversación: Teología Geek');
+      expect(content).toContain('- Primera opinión');
+      expect(content).toContain('- Segunda opinión');
+    });
+
+    it('builds the prompt without optional context fields', async () => {
+      await detectUserHeresy({ messages: ['Solo un mensaje'] });
+
+      const lastCall = calls.at(-1) as any;
+      const content = lastCall.messages?.[0]?.content as string;
+
+      expect(content).not.toContain('Autor o remitente:');
+      expect(content).not.toContain('Conversación:');
+      expect(content).toContain('- Solo un mensaje');
+    });
+
+    it('uses the heresy system prompt', async () => {
+      await detectUserHeresy({ messages: ['Texto'] });
+
+      const lastCall = calls.at(-1) as any;
+      expect(lastCall.system).toContain('herejía histórica');
+    });
+
+    it('formats multiple messages as a bullet list', async () => {
+      const messages = ['Msg A', 'Msg B', 'Msg C'];
+      await detectUserHeresy({ messages });
+
+      const lastCall = calls.at(-1) as any;
+      const content = lastCall.messages?.[0]?.content as string;
+
+      expect(content).toContain('- Msg A\n- Msg B\n- Msg C');
+    });
   });
 });
