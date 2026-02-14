@@ -1,7 +1,9 @@
-import { google } from '@ai-sdk/google';
+// import { google } from '@ai-sdk/google';
 import { generateText } from 'ai';
-import { GOOGLE_MODEL_BASIC } from '../constants';
+import { zhipu } from 'zhipu-ai-provider';
+import { ZHIPU_MODEL } from '../constants';
 import { fallacyDetectorPrompt } from '../prompts/fallacy-detector';
+import { logTokenUsage } from './token-usage';
 
 export interface FallacyDetectorOptions {
   authorName?: string;
@@ -27,11 +29,13 @@ export async function detectMessageFallacies(message: string, options: FallacyDe
     .filter(Boolean)
     .join('\n');
 
-  const { text } = await generateText({
-    model: google(GOOGLE_MODEL_BASIC),
+  const { text, usage } = await generateText({
+    // model: google(GOOGLE_MODEL_BASIC),
+    model: zhipu(ZHIPU_MODEL),
     system: fallacyDetectorPrompt,
     messages: [{ role: 'user', content: userContent }],
   });
+  logTokenUsage('/fallacy_detector', usage);
 
   return { text };
 }

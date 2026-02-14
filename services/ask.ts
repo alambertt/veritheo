@@ -1,20 +1,24 @@
 import { google } from '@ai-sdk/google';
+import type { Tool } from 'ai';
 import { generateText } from 'ai';
 import { GOOGLE_MODEL_LATEST } from '../constants';
 import { initialPrompt } from '../prompts/initial';
+import { logTokenUsage } from './token-usage';
 
 export async function askHandler(question: string, messagesContext?: string[]) {
-  const { text, sources, providerMetadata } = await generateText({
+  const googleSearchTool = google.tools.googleSearch({}) as Tool<any, any>;
+  const { text, sources, providerMetadata, usage } = await generateText({
     model: google(GOOGLE_MODEL_LATEST),
     system: initialPrompt,
     tools: {
-      google_search: google.tools.googleSearch({}),
+      google_search: googleSearchTool,
     },
     messages: [
       ...(messagesContext?.map(msg => ({ role: 'user' as const, content: msg })) ?? []),
       { role: 'user' as const, content: question },
     ],
   });
+  logTokenUsage(messagesContext?.length ? '/ask_group' : '/ask', usage);
   console.log('🚀 ~ askHandler ~ providerMetadata:', providerMetadata);
   console.log('🚀 ~ askHandler ~ sources:', sources);
   console.log('🚀 ~ askHandler ~ text:', text);

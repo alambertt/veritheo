@@ -1,11 +1,13 @@
 import { google } from '@ai-sdk/google';
 import type { GoogleGenerativeAIProviderMetadata } from '@ai-sdk/google';
 import { generateText } from 'ai';
+import type { Tool } from 'ai';
+const googleSearchTool = google.tools.googleSearch({}) as Tool<any, any>;
 
 const { text, sources, providerMetadata } = await generateText({
   model: google('gemini-2.5-flash'),
   tools: {
-    google_search: google.tools.googleSearch({}),
+    google_search: googleSearchTool,
   },
   prompt: 'List the top 5 San Francisco news from the past week.' + 'You must include the date of each article.',
 });

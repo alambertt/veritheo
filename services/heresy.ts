@@ -3,6 +3,7 @@ import { generateText } from 'ai';
 import { google } from '@ai-sdk/google';
 import { GOOGLE_MODEL_LATEST } from '../constants';
 import { heresyPrompt } from '../prompts/heresy';
+import { logTokenUsage } from './token-usage';
 
 export interface HeresyOptions {
   authorName?: string;
@@ -39,11 +40,7 @@ export async function detectUserHeresy(options: HeresyOptions) {
     system: heresyPrompt,
     messages: [{ role: 'user', content: userContent }],
   });
-  console.log('🧮 /my_heresy token usage:', {
-    inputTokens: usage?.inputTokens ?? null,
-    outputTokens: usage?.outputTokens ?? null,
-    totalTokens: usage?.totalTokens ?? null,
-  });
+  logTokenUsage('/my_heresy', usage);
 
   return { text };
 }

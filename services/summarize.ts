@@ -1,6 +1,7 @@
 import { google } from '@ai-sdk/google';
 import { generateText } from 'ai';
 import { GOOGLE_MODEL_BASIC } from '../constants';
+import { logTokenUsage } from './token-usage';
 
 const systemPrompt = `
 Eres un asistente especializado en crear resúmenes claros, fieles y concisos en español.
@@ -19,7 +20,7 @@ export async function summarizeText(text: string, limitChars = 4000): Promise<st
     return text;
   }
 
-  const { text: summaryCandidate } = await generateText({
+  const { text: summaryCandidate, usage } = await generateText({
     model: google(GOOGLE_MODEL_BASIC),
     system: systemPrompt.replace('{{limit}}', String(limitChars)),
     messages: [
@@ -34,6 +35,7 @@ export async function summarizeText(text: string, limitChars = 4000): Promise<st
       },
     ],
   });
+  logTokenUsage('/summarize', usage);
 
   if (!summaryCandidate) {
     return text.length > limitChars ? `${text.slice(0, limitChars - 1)}…` : text;
