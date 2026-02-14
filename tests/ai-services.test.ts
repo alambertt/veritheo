@@ -73,7 +73,7 @@ describe('AI-backed services', () => {
     const lastCall = calls.at(-1) as any;
     const messageContent = lastCall.messages?.[0]?.content as string;
 
-    expect(messageContent).toContain('Conversacion: Sala');
+    expect(messageContent).toContain('Conversación: Sala');
     expect(messageContent).toContain('Texto');
   });
 

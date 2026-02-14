@@ -1,6 +1,7 @@
 import { google } from '@ai-sdk/google';
 import { generateText } from 'ai';
-import { GOOGLE_MODEL_BASIC, GOOGLE_MODEL_LATEST } from '../constants';
+import type { Tool } from 'ai';
+import { GOOGLE_MODEL_BASIC } from '../constants';
 import { verifyPrompt } from '../prompts/verify';
 import { logTokenUsage } from './token-usage';
 
@@ -10,6 +11,7 @@ export interface VerifyMessageOptions {
 }
 
 export async function verifyMessageContent(message: string, options: VerifyMessageOptions = {}) {
+  const googleSearchTool = google.tools.googleSearch({}) as Tool<any, any>;
   const contextLines: string[] = [];
   if (options.authorName) {
     contextLines.push(`Autor o remitente: ${options.authorName}`);
@@ -29,8 +31,11 @@ export async function verifyMessageContent(message: string, options: VerifyMessa
     .join('\n');
 
   const { text, usage } = await generateText({
-    model: google(GOOGLE_MODEL_LATEST),
+    model: google(GOOGLE_MODEL_BASIC),
     system: verifyPrompt,
+    tools: {
+      google_search: googleSearchTool,
+    },
     messages: [{ role: 'user', content: userContent }],
   });
   logTokenUsage('/verify', usage);
