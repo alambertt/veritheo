@@ -1,6 +1,7 @@
-import { xai } from '@ai-sdk/xai';
 import { generateText } from 'ai';
-import { GROK_MODEL } from '../constants';
+// import { zhipu } from 'zhipu-ai-provider';
+import { google } from '@ai-sdk/google';
+import { GOOGLE_MODEL_LATEST } from '../constants';
 import { heresyPrompt } from '../prompts/heresy';
 
 export interface HeresyOptions {
@@ -32,10 +33,16 @@ export async function detectUserHeresy(options: HeresyOptions) {
     .filter(Boolean)
     .join('\n');
 
-  const { text } = await generateText({
-    model: xai.responses(GROK_MODEL),
+  const { text, usage } = await generateText({
+    // model: zhipu(ZHIPU_MODEL),
+    model: google(GOOGLE_MODEL_LATEST),
     system: heresyPrompt,
     messages: [{ role: 'user', content: userContent }],
+  });
+  console.log('🧮 /my_heresy token usage:', {
+    inputTokens: usage?.inputTokens ?? null,
+    outputTokens: usage?.outputTokens ?? null,
+    totalTokens: usage?.totalTokens ?? null,
   });
 
   return { text };

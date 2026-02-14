@@ -26,6 +26,7 @@
     "@ai-sdk/xai": "3.0.49",
     "ai": "6.0.78",
     "dotenv": "17.2.3",
-    "grammy": "1.38.3"
+    "grammy": "1.38.3",
+    "zhipu-ai-provider": "^0.2.2"
   }
 }
