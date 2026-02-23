@@ -36,6 +36,31 @@ const CREATE_HERESY_CACHE_INDEX = `
   CREATE INDEX IF NOT EXISTS idx_heresy_cache_chat_user
     ON heresy_cache (chat_id, user_id, created_at);
 `;
+const CREATE_LLM_JOBS_TABLE = `
+  CREATE TABLE IF NOT EXISTS llm_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    chat_id INTEGER NOT NULL,
+    request_message_id INTEGER NOT NULL,
+    question TEXT NOT NULL,
+    context_messages_json TEXT,
+    created_at INTEGER NOT NULL,
+    available_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT
+  );
+`;
+
+const CREATE_LLM_JOBS_STATUS_INDEX = `
+  CREATE INDEX IF NOT EXISTS idx_llm_jobs_status_available_created
+    ON llm_jobs (status, available_at, created_at, id);
+`;
+
+const CREATE_LLM_JOBS_CHAT_INDEX = `
+  CREATE INDEX IF NOT EXISTS idx_llm_jobs_chat_status_created
+    ON llm_jobs (chat_id, status, created_at, id);
+`;
 
 let insertMessageStatement: Statement | undefined;
 
@@ -56,6 +81,9 @@ export function setupSchema(db: Database) {
   db.run(CREATE_MESSAGES_TABLE);
   db.run(CREATE_HERESY_CACHE_TABLE);
   db.run(CREATE_HERESY_CACHE_INDEX);
+  db.run(CREATE_LLM_JOBS_TABLE);
+  db.run(CREATE_LLM_JOBS_STATUS_INDEX);
+  db.run(CREATE_LLM_JOBS_CHAT_INDEX);
 }
 
 export type TelegramRawMessage = {
@@ -104,6 +132,23 @@ export interface HeresyCacheEntry {
   user_id: number;
   created_at: number;
   response: string;
+}
+
+export type LlmJobKind = 'ask' | 'ask_group' | 'verify';
+export type LlmJobStatus = 'pending' | 'processing' | 'done' | 'failed';
+
+export interface LlmJob {
+  id: number;
+  kind: LlmJobKind;
+  status: LlmJobStatus;
+  chat_id: number;
+  request_message_id: number;
+  question: string;
+  context_messages: string[];
+  created_at: number;
+  available_at: number;
+  attempts: number;
+  last_error?: string;
 }
 
 function mapChat(chat: Chat): TelegramRawMessage['chat'] {
@@ -463,4 +508,234 @@ export function getMessageByChatAndMessageId(
   });
 
   return row ? mapStoredMessageRow(row) : undefined;
+}
+
+function mapLlmJobRow(row: any): LlmJob {
+  let contextMessages: string[] = [];
+  if (typeof row.context_messages_json === 'string' && row.context_messages_json.trim() !== '') {
+    try {
+      const parsed = JSON.parse(row.context_messages_json);
+      if (Array.isArray(parsed)) {
+        contextMessages = parsed.filter((message): message is string => typeof message === 'string');
+      }
+    } catch {
+      contextMessages = [];
+    }
+  }
+
+  return {
+    id: row.id,
+    kind: row.kind,
+    status: row.status,
+    chat_id: row.chat_id,
+    request_message_id: row.request_message_id,
+    question: row.question,
+    context_messages: contextMessages,
+    created_at: row.created_at,
+    available_at: row.available_at,
+    attempts: row.attempts,
+    last_error: row.last_error ?? undefined,
+  };
+}
+
+export function enqueueLlmJob(
+  db: Database,
+  params: {
+    kind: LlmJobKind;
+    chatId: number;
+    requestMessageId: number;
+    question: string;
+    contextMessages?: string[];
+    availableAt?: number;
+  }
+): number {
+  const now = Math.floor(Date.now() / 1000);
+  const query = db.query(
+    `
+      INSERT INTO llm_jobs (
+        kind,
+        status,
+        chat_id,
+        request_message_id,
+        question,
+        context_messages_json,
+        created_at,
+        available_at,
+        attempts,
+        last_error
+      ) VALUES (
+        $kind,
+        'pending',
+        $chat_id,
+        $request_message_id,
+        $question,
+        $context_messages_json,
+        $created_at,
+        $available_at,
+        0,
+        NULL
+      )
+    `
+  );
+
+  const result = query.run({
+    $kind: params.kind,
+    $chat_id: params.chatId,
+    $request_message_id: params.requestMessageId,
+    $question: params.question,
+    $context_messages_json: params.contextMessages ? JSON.stringify(params.contextMessages) : null,
+    $created_at: now,
+    $available_at: params.availableAt ?? now,
+  });
+
+  return Number(result.lastInsertRowid);
+}
+
+export function requeueStuckLlmJobs(db: Database): number {
+  const now = Math.floor(Date.now() / 1000);
+  const query = db.query(
+    `
+      UPDATE llm_jobs
+      SET status = 'pending',
+          available_at = $now
+      WHERE status = 'processing'
+    `
+  );
+  const result = query.run({ $now: now });
+  return result.changes;
+}
+
+export function claimNextLlmJob(db: Database, lockedChatIds: number[] = []): LlmJob | undefined {
+  const now = Math.floor(Date.now() / 1000);
+  const normalizedLockedChatIds = lockedChatIds
+    .filter(chatId => Number.isSafeInteger(chatId))
+    .map(chatId => Number(chatId));
+  const lockFilter =
+    normalizedLockedChatIds.length > 0
+      ? `AND j.chat_id NOT IN (${normalizedLockedChatIds.join(', ')})`
+      : '';
+
+  const query = db.query(
+    `
+      SELECT j.*
+      FROM llm_jobs j
+      WHERE j.status = 'pending'
+        AND j.available_at <= $now
+        ${lockFilter}
+        AND NOT EXISTS (
+          SELECT 1
+          FROM llm_jobs p
+          WHERE p.chat_id = j.chat_id
+            AND p.status = 'processing'
+        )
+      ORDER BY j.created_at ASC, j.id ASC
+      LIMIT 1
+    `
+  );
+
+  const candidate: any = query.get({ $now: now });
+  if (!candidate) {
+    return undefined;
+  }
+
+  const claimQuery = db.query(
+    `
+      UPDATE llm_jobs
+      SET status = 'processing',
+          attempts = attempts + 1,
+          last_error = NULL
+      WHERE id = $id
+        AND status = 'pending'
+    `
+  );
+  const claimResult = claimQuery.run({ $id: candidate.id });
+  if (claimResult.changes === 0) {
+    return undefined;
+  }
+
+  const claimedRow: any = db
+    .query(
+      `
+        SELECT *
+        FROM llm_jobs
+        WHERE id = $id
+        LIMIT 1
+      `
+    )
+    .get({ $id: candidate.id });
+
+  return claimedRow ? mapLlmJobRow(claimedRow) : undefined;
+}
+
+export function markLlmJobDone(db: Database, jobId: number): void {
+  db.query(
+    `
+      UPDATE llm_jobs
+      SET status = 'done',
+          available_at = CAST(strftime('%s','now') AS INTEGER),
+          last_error = NULL
+      WHERE id = $id
+    `
+  ).run({ $id: jobId });
+}
+
+export function markLlmJobFailed(
+  db: Database,
+  params: {
+    jobId: number;
+    error: string;
+    retryInSeconds?: number;
+    maxAttempts?: number;
+  }
+): void {
+  const row: any = db
+    .query(
+      `
+        SELECT attempts
+        FROM llm_jobs
+        WHERE id = $id
+        LIMIT 1
+      `
+    )
+    .get({ $id: params.jobId });
+
+  if (!row) {
+    return;
+  }
+
+  const attempts = Number(row.attempts ?? 0);
+  const maxAttempts = params.maxAttempts ?? 3;
+  const shouldRetry = attempts < maxAttempts;
+  const retryInSeconds = params.retryInSeconds ?? Math.min(60, 2 ** attempts);
+  const now = Math.floor(Date.now() / 1000);
+
+  db.query(
+    `
+      UPDATE llm_jobs
+      SET status = $status,
+          available_at = $available_at,
+          last_error = $last_error
+      WHERE id = $id
+    `
+  ).run({
+    $status: shouldRetry ? 'pending' : 'failed',
+    $available_at: shouldRetry ? now + retryInSeconds : now,
+    $last_error: params.error,
+    $id: params.jobId,
+  });
+}
+
+export function countPendingLlmJobsForChat(db: Database, chatId: number): number {
+  const row: any = db
+    .query(
+      `
+        SELECT COUNT(*) AS count
+        FROM llm_jobs
+        WHERE chat_id = $chat_id
+          AND status IN ('pending', 'processing')
+      `
+    )
+    .get({ $chat_id: chatId });
+
+  return Number(row?.count ?? 0);
 }

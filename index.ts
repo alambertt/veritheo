@@ -1,14 +1,15 @@
 import { config } from 'dotenv';
 import { Bot } from 'grammy';
-import { askHandler } from './services/ask';
 import { createChannelLogger, formatDisplayName } from './services/channel-logs';
 import { detectMessageFallacies } from './services/fallacy-detector';
 import { detectUserHeresy } from './services/heresy';
+import { startLlmQueueWorker } from './services/llm-queue';
 import { replyWithLLMMessage } from './services/reply';
 import { roastMessageContent } from './services/roast';
-import { buildSourcesMessage } from './services/sources';
 import {
   buildTelegramMessageRecord,
+  countPendingLlmJobsForChat,
+  enqueueLlmJob,
   getMessageByChatAndMessageId,
   getMessagesByChat,
   getHeresyCacheEntry,
@@ -20,7 +21,6 @@ import {
 } from './services/sqlite';
 import { findSimilarBotMessageInChat } from './services/self-message-guard';
 import { startTypingIndicator } from './services/typing-indicator';
-import { verifyMessageContent } from './services/verify';
 import { SIMILARITY_THRESHOLD } from './constants';
 
 config();
@@ -124,20 +124,27 @@ bot.command('ask', async ctx => {
       await ctx.reply('Por favor, proporciona una pregunta después del comando /ask.');
       return;
     }
-    const stopTyping = startTypingIndicator(ctx);
-    try {
-      const { text, sources } = await askHandler(question);
-      if (text) {
-        await replyWithLLMMessage(ctx, database, text);
-        await sendChannelLog(`📝 /ask response\n${text}`);
-      }
-      const sourcesMessage = buildSourcesMessage(sources);
-      if (sourcesMessage) {
-        await replyWithLLMMessage(ctx, database, sourcesMessage);
-      }
-    } finally {
-      stopTyping();
+    const chatId = ctx.chat?.id;
+    const requestMessageId = ctx.message?.message_id;
+    if (!chatId || !requestMessageId) {
+      await ctx.reply(GENERIC_ERROR_MESSAGE);
+      return;
     }
+
+    enqueueLlmJob(database, {
+      kind: 'ask',
+      chatId,
+      requestMessageId,
+      question: question.trim(),
+    });
+    const pendingJobs = countPendingLlmJobsForChat(database, chatId);
+    const queueMessage =
+      pendingJobs > 1
+        ? `✅ Recibido. Hay ${pendingJobs - 1} solicitud(es) antes de la tuya en la cola.`
+        : '✅ Recibido. Estoy procesando tu solicitud.';
+    await ctx.reply(queueMessage, {
+      reply_to_message_id: requestMessageId,
+    });
   } catch (error) {
     console.error('Failed to process /ask command:', error);
     await notifyError(`Failed to process /ask command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
@@ -175,19 +182,27 @@ bot.command('ask_group', async ctx => {
       }
     }
 
-    const stopTyping = startTypingIndicator(ctx);
-    try {
-      const { text, sources } = await askHandler(question, contextMessages);
-      if (text) {
-        await replyWithLLMMessage(ctx, database, text);
-      }
-      const sourcesMessage = buildSourcesMessage(sources);
-      if (sourcesMessage) {
-        await replyWithLLMMessage(ctx, database, sourcesMessage);
-      }
-    } finally {
-      stopTyping();
+    const requestMessageId = ctx.message?.message_id;
+    if (!chatId || !requestMessageId) {
+      await ctx.reply(GENERIC_ERROR_MESSAGE);
+      return;
     }
+
+    enqueueLlmJob(database, {
+      kind: 'ask_group',
+      chatId,
+      requestMessageId,
+      question,
+      contextMessages,
+    });
+    const pendingJobs = countPendingLlmJobsForChat(database, chatId);
+    const queueMessage =
+      pendingJobs > 1
+        ? `✅ Recibido. Hay ${pendingJobs - 1} solicitud(es) antes de la tuya en la cola.`
+        : '✅ Recibido. Estoy procesando tu solicitud.';
+    await ctx.reply(queueMessage, {
+      reply_to_message_id: requestMessageId,
+    });
   } catch (error) {
     console.error('Failed to process /ask_group command:', error);
     await notifyError(`Failed to process /ask_group command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
@@ -296,26 +311,29 @@ bot.command('verify', async ctx => {
       await ctx.reply('Lo siento, no puedo verificar mensajes que yo mismo haya enviado.');
       return;
     }
-    const stopTyping = startTypingIndicator(ctx);
-    try {
-      const { text } = await verifyMessageContent(messageToVerify, {
-        authorName,
-        chatTitle:
-          'title' in ctx.chat && typeof ctx.chat.title === 'string'
-            ? ctx.chat.title
-            : 'username' in ctx.chat
-              ? ctx.chat.username
-              : undefined,
-      });
+    const chatTitle =
+      'title' in ctx.chat && typeof ctx.chat.title === 'string'
+        ? ctx.chat.title
+        : 'username' in ctx.chat
+          ? ctx.chat.username
+          : undefined;
 
-      if (text) {
-        await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
-      } else {
-        await ctx.reply('No se obtuvo un análisis válido del mensaje. Intenta nuevamente más tarde.');
-      }
-    } finally {
-      stopTyping();
-    }
+    enqueueLlmJob(database, {
+      kind: 'verify',
+      chatId,
+      requestMessageId: replyToId,
+      question: messageToVerify,
+      contextMessages: [authorName ?? '', chatTitle ?? ''],
+    });
+
+    const pendingJobs = countPendingLlmJobsForChat(database, chatId);
+    const queueMessage =
+      pendingJobs > 1
+        ? `✅ Verificación en cola. Hay ${pendingJobs - 1} solicitud(es) antes de la tuya.`
+        : '✅ Verificación recibida. Estoy procesando tu solicitud.';
+    await ctx.reply(queueMessage, {
+      reply_to_message_id: ctx.message.message_id,
+    });
   } catch (error) {
     console.error('Failed to process /verify command:', error);
     await notifyError(`Failed to process /verify command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
@@ -695,4 +713,7 @@ bot.catch(async err => {
 
 console.log('Starting bot...');
 sendChannelLog('🚀 Bot starting...');
+startLlmQueueWorker(bot, database, {
+  onError: notifyError,
+});
 bot.start();
