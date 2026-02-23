@@ -129,6 +129,7 @@ bot.command('ask', async ctx => {
       const { text, sources } = await askHandler(question);
       if (text) {
         await replyWithLLMMessage(ctx, database, text);
+        await sendChannelLog(`📝 /ask response\n${text}`);
       }
       const sourcesMessage = buildSourcesMessage(sources);
       if (sourcesMessage) {
