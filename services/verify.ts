@@ -1,7 +1,7 @@
-import { google } from '@ai-sdk/google';
+// import { google } from '@ai-sdk/google';
+import { xai } from "@ai-sdk/xai";
 import { generateText } from 'ai';
-import type { Tool } from 'ai';
-import { GOOGLE_MODEL_BASIC } from '../constants';
+import { GROK_MODEL } from '../constants';
 import { verifyPrompt } from '../prompts/verify';
 import { logTokenUsage } from './token-usage';
 
@@ -11,7 +11,7 @@ export interface VerifyMessageOptions {
 }
 
 export async function verifyMessageContent(message: string, options: VerifyMessageOptions = {}) {
-  const googleSearchTool = google.tools.googleSearch({}) as Tool<any, any>;
+  const webSearchTool = xai.tools.webSearch({});
   const contextLines: string[] = [];
   if (options.authorName) {
     contextLines.push(`Autor o remitente: ${options.authorName}`);
@@ -31,10 +31,10 @@ export async function verifyMessageContent(message: string, options: VerifyMessa
     .join('\n');
 
   const { text, usage } = await generateText({
-    model: google(GOOGLE_MODEL_BASIC),
+    model: xai.responses(GROK_MODEL),
     system: verifyPrompt,
     tools: {
-      google_search: googleSearchTool,
+      web_search: webSearchTool,
     },
     messages: [{ role: 'user', content: userContent }],
   });
