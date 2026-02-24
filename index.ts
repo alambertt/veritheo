@@ -4,8 +4,10 @@ import { createChannelLogger, formatDisplayName } from './services/channel-logs'
 import { detectMessageFallacies } from './services/fallacy-detector';
 import { detectUserHeresy } from './services/heresy';
 import { startLlmQueueWorker } from './services/llm-queue';
+import { BANNED_COMMAND_MESSAGE, buildQueueReceivedMessage, GENERIC_ERROR_MESSAGE, MESSAGES } from './services/messages';
 import { replyWithLLMMessage } from './services/reply';
 import { roastMessageContent } from './services/roast';
+import { verifyMessageContent } from './services/verify';
 import {
   buildTelegramMessageRecord,
   countPendingLlmJobsForChat,
@@ -76,9 +78,6 @@ const BANNED_USER_IDS = Array.from(
 );
 const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ?? undefined;
 
-const GENERIC_ERROR_MESSAGE =
-  'Lo siento, ha ocurrido un error mientras procesaba tu solicitud. Por favor, inténtalo de nuevo más tarde.';
-const BANNED_COMMAND_MESSAGE = 'No tienes permisos para usar los comandos de este bot.';
 const HERESY_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
 const HERESY_LOOKBACK_SECONDS = 365 * 24 * 60 * 60;
 const HERESY_MIN_LENGTH = 100;
@@ -111,9 +110,7 @@ bot.use(async (ctx, next) => {
 
 bot.command('start', ctx => {
   logCommandInvocation(ctx, '/start');
-  ctx.reply(
-    'Bienvenido a Veritheo! 🙏 Soy tu asistente teológico. Hazme cualquier pregunta teológica y te ayudaré a explorar las profundidades de la fe y la verdad. Usa /help para más información.',
-  );
+  ctx.reply(MESSAGES.start);
 });
 
 bot.command('ask', async ctx => {
@@ -121,7 +118,7 @@ bot.command('ask', async ctx => {
     const question = ctx.message?.text.split(' ').slice(1).join(' ');
     logCommandInvocation(ctx, '/ask', [`Question: ${question?.trim() || '[none provided]'}`]);
     if (!question) {
-      await ctx.reply('Por favor, proporciona una pregunta después del comando /ask.');
+      await ctx.reply(MESSAGES.askMissingQuestion);
       return;
     }
     const chatId = ctx.chat?.id;
@@ -138,11 +135,7 @@ bot.command('ask', async ctx => {
       question: question.trim(),
     });
     const pendingJobs = countPendingLlmJobsForChat(database, chatId);
-    const queueMessage =
-      pendingJobs > 1
-        ? `✅ Recibido. Hay ${pendingJobs - 1} solicitud(es) antes de la tuya en la cola.`
-        : '✅ Recibido. Estoy procesando tu solicitud.';
-    await ctx.reply(queueMessage, {
+    await ctx.reply(buildQueueReceivedMessage(pendingJobs), {
       reply_to_message_id: requestMessageId,
     });
   } catch (error) {
@@ -166,7 +159,7 @@ bot.command('ask_group', async ctx => {
     const chatId = ctx.chat?.id;
 
     if (!question) {
-      await ctx.reply('Por favor, proporciona una pregunta después del comando /ask_group.');
+      await ctx.reply(MESSAGES.askGroupMissingQuestion);
       return;
     }
 
@@ -196,11 +189,7 @@ bot.command('ask_group', async ctx => {
       contextMessages,
     });
     const pendingJobs = countPendingLlmJobsForChat(database, chatId);
-    const queueMessage =
-      pendingJobs > 1
-        ? `✅ Recibido. Hay ${pendingJobs - 1} solicitud(es) antes de la tuya en la cola.`
-        : '✅ Recibido. Estoy procesando tu solicitud.';
-    await ctx.reply(queueMessage, {
+    await ctx.reply(buildQueueReceivedMessage(pendingJobs), {
       reply_to_message_id: requestMessageId,
     });
   } catch (error) {
@@ -217,35 +206,19 @@ bot.command('ask_group', async ctx => {
 
 bot.command('help', ctx => {
   logCommandInvocation(ctx, '/help');
-  ctx.reply(
-    `
-Bienvenido a Veritheo - Tu Guía Teológica
-
-Comandos disponibles:
-/ask - Pregunta lo que quieras en el chat privado
-/ask_group - Pregunta en el grupo tomando como contexto los mensajes anteriores
-/help - Lo que necesitas saber para utilizar este bot
-/persona - Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura
-/verify - Responde a un mensaje para verificar su contenido y citar posibles errores
-/fallacy_detector - Analiza un mensaje en busca de falacias argumentativas
-/roast - Refuta un argumento usando los mejores contraargumentos del espectro teológico contrario
-/my_heresy - Descubre tu herejía histórica según tus mensajes en el grupo
-
-Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orientación.
-  `.trim(),
-  );
+  ctx.reply(MESSAGES.help);
 });
 
 bot.command('persona', ctx => {
   logCommandInvocation(ctx, '/persona');
-  ctx.reply('Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura');
+  ctx.reply(MESSAGES.persona);
 });
 
 bot.command('verify', async ctx => {
   try {
     logCommandInvocation(ctx, '/verify', [`ReplyToMessageId: ${ctx.message?.reply_to_message?.message_id ?? 'none'}`]);
     if (!ctx.message?.reply_to_message || !ctx.chat?.id) {
-      await ctx.reply('Por favor, responde al mensaje que deseas verificar y luego usa /verify.');
+      await ctx.reply(MESSAGES.verifyReplyRequired);
       return;
     }
 
@@ -256,9 +229,7 @@ bot.command('verify', async ctx => {
     const authorId = ctx.message.reply_to_message.from?.id;
 
     if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
-      await ctx.reply(
-        '😇 Este sabio infalible nunca se equivoca, así que no puedo verificar sus mensajes por respeto a su legendaria sabiduría. ✨',
-      );
+      await ctx.reply(MESSAGES.verifyUntouchable);
       return;
     }
 
@@ -294,13 +265,11 @@ bot.command('verify', async ctx => {
     }
 
     if (!messageToVerify) {
-      await ctx.reply(
-        'No pude encontrar el contenido del mensaje original. Asegúrate de responder a un mensaje de texto antes de usar /verify.',
-      );
+      await ctx.reply(MESSAGES.verifyOriginalMissing);
       return;
     }
     if (ctx.message.reply_to_message.from?.is_bot) {
-      await ctx.reply('Lo siento, no puedo verificar mensajes que yo mismo haya enviado.');
+      await ctx.reply(MESSAGES.verifyBotMessageBlocked);
       return;
     }
 
@@ -308,7 +277,7 @@ bot.command('verify', async ctx => {
       threshold: SIMILARITY_THRESHOLD,
     });
     if (botSimilarity.blocked) {
-      await ctx.reply('Lo siento, no puedo verificar mensajes que yo mismo haya enviado.');
+      await ctx.reply(MESSAGES.verifyBotMessageBlocked);
       return;
     }
     const chatTitle =
@@ -352,7 +321,7 @@ bot.command('fallacy_detector', async ctx => {
       `ReplyToMessageId: ${ctx.message?.reply_to_message?.message_id ?? 'none'}`,
     ]);
     if (!ctx.message?.reply_to_message || !ctx.chat?.id) {
-      await ctx.reply('Por favor, responde al mensaje que deseas analizar y luego usa /fallacy_detector.');
+      await ctx.reply(MESSAGES.fallacyReplyRequired);
       return;
     }
 
@@ -397,16 +366,12 @@ bot.command('fallacy_detector', async ctx => {
     }
 
     if (!messageToAnalyze) {
-      await ctx.reply(
-        'No pude encontrar el contenido del mensaje original. Asegúrate de responder a un mensaje de texto antes de usar /fallacy_detector.',
-      );
+      await ctx.reply(MESSAGES.fallacyOriginalMissing);
       return;
     }
 
     if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
-      await ctx.reply(
-        '😇 Este sabio infalible nunca se equivoca, así que no puedo analizar sus mensajes por respeto a su legendaria sabiduría. ✨',
-      );
+      await ctx.reply(MESSAGES.fallacyUntouchable);
       return;
     }
 
@@ -425,7 +390,7 @@ bot.command('fallacy_detector', async ctx => {
       if (text) {
         await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
       } else {
-        await ctx.reply('No se obtuvo un análisis válido del mensaje. Intenta nuevamente más tarde.');
+        await ctx.reply(MESSAGES.fallacyEmptyResult);
       }
     } finally {
       stopTyping();
@@ -505,12 +470,12 @@ bot.command('roast', async ctx => {
     }
 
     if (!messageToRoast) {
-      await ctx.reply('Por favor, responde a un mensaje o agrega el argumento después de /roast.');
+      await ctx.reply(MESSAGES.roastMissingArgument);
       return;
     }
 
     if (replyToMessage?.from?.is_bot) {
-      await ctx.reply('Lo siento, no puedo rostizar mensajes que yo mismo haya enviado.');
+      await ctx.reply(MESSAGES.roastBotMessageBlocked);
       return;
     }
 
@@ -519,14 +484,12 @@ bot.command('roast', async ctx => {
         threshold: SIMILARITY_THRESHOLD,
       });
       if (botSimilarity.blocked) {
-        await ctx.reply('Lo siento, no puedo rostizar mensajes que yo mismo haya enviado.');
+        await ctx.reply(MESSAGES.roastBotMessageBlocked);
         return;
       }
     }
     if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
-      await ctx.reply(
-        '😇 Este sabio infalible nunca se equivoca, así que no puedo rostizar sus mensajes por respeto a su legendaria sabiduría. ✨',
-      );
+      await ctx.reply(MESSAGES.roastUntouchable);
       return;
     }
 
@@ -545,7 +508,7 @@ bot.command('roast', async ctx => {
       if (text) {
         await replyWithLLMMessage(ctx, database, text, replyTargetId ? { replyToMessageId: replyTargetId } : undefined);
       } else {
-        await ctx.reply('No se obtuvo una respuesta válida del modelo. Intenta nuevamente más tarde.');
+        await ctx.reply(MESSAGES.modelEmptyResult);
       }
     } finally {
       stopTyping();
@@ -572,17 +535,17 @@ bot.command('my_heresy', async ctx => {
     logCommandInvocation(ctx, '/my_heresy', [`ReplyToMessageId: ${replyToId ?? 'none'}`]);
 
     if (!chatId || !chatType || chatType === 'private') {
-      await ctx.reply('Este comando está pensado para grupos. Úsalo en un chat grupal respondiendo a un mensaje.');
+      await ctx.reply(MESSAGES.heresyGroupOnly);
       return;
     }
 
     if (!replyToMessage) {
-      await ctx.reply('Responde a un mensaje del usuario para descubrir su herejía histórica.');
+      await ctx.reply(MESSAGES.heresyReplyRequired);
       return;
     }
 
     if (replyToMessage.from?.is_bot) {
-      await ctx.reply('Lo siento, no puedo evaluar la herejía de mensajes enviados por bots.');
+      await ctx.reply(MESSAGES.heresyBotBlocked);
       return;
     }
 
@@ -613,14 +576,12 @@ bot.command('my_heresy', async ctx => {
     }
 
     if (!authorId) {
-      await ctx.reply('No pude identificar al usuario. Responde a un mensaje válido e intenta de nuevo.');
+      await ctx.reply(MESSAGES.heresyUserMissing);
       return;
     }
 
     if (UNTOUCHABLE_USER_IDS.includes(authorId)) {
-      await ctx.reply(
-        '😇 Este sabio infalible está más allá de las herejías terrenales. Mejor solo admirarlo desde lejos. ✨',
-      );
+      await ctx.reply(MESSAGES.heresyUntouchable);
       return;
     }
 
@@ -642,9 +603,7 @@ bot.command('my_heresy', async ctx => {
       .filter((text): text is string => Boolean(text && text.length > HERESY_MIN_LENGTH));
 
     if (messageTexts.length === 0) {
-      await ctx.reply(
-        'No encontré suficientes mensajes largos del último año para ese usuario. Necesito más material de herejía.',
-      );
+      await ctx.reply(MESSAGES.heresyInsufficientMaterial);
       return;
     }
 
@@ -665,7 +624,7 @@ bot.command('my_heresy', async ctx => {
           response: text,
         });
       } else {
-        await ctx.reply('No se obtuvo una respuesta válida del modelo. Intenta nuevamente más tarde.');
+        await ctx.reply(MESSAGES.modelEmptyResult);
       }
     } finally {
       stopTyping();
@@ -684,7 +643,7 @@ bot.command('my_heresy', async ctx => {
 
 bot.command('ping', ctx => {
   logCommandInvocation(ctx, '/ping');
-  ctx.reply('🏓 Pong!');
+  ctx.reply(MESSAGES.ping);
 });
 
 bot.on('message', async ctx => {
