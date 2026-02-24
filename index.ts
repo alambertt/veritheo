@@ -287,22 +287,21 @@ bot.command('verify', async ctx => {
           ? ctx.chat.username
           : undefined;
 
-    enqueueLlmJob(database, {
-      kind: 'verify',
-      chatId,
-      requestMessageId: replyToId,
-      question: messageToVerify,
-      contextMessages: [authorName ?? '', chatTitle ?? ''],
-    });
+    const stopTyping = startTypingIndicator(ctx);
+    try {
+      const { text } = await verifyMessageContent(messageToVerify, {
+        authorName,
+        chatTitle,
+      });
 
-    const pendingJobs = countPendingLlmJobsForChat(database, chatId);
-    const queueMessage =
-      pendingJobs > 1
-        ? `✅ Verificación en cola. Hay ${pendingJobs - 1} solicitud(es) antes de la tuya.`
-        : '✅ Verificación recibida. Estoy procesando tu solicitud.';
-    await ctx.reply(queueMessage, {
-      reply_to_message_id: ctx.message.message_id,
-    });
+      if (text) {
+        await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
+      } else {
+        await ctx.reply(MESSAGES.verifyEmptyResult);
+      }
+    } finally {
+      stopTyping();
+    }
   } catch (error) {
     console.error('Failed to process /verify command:', error);
     await notifyError(`Failed to process /verify command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
