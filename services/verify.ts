@@ -5,6 +5,8 @@ import { GROK_MODEL } from '../constants';
 import { verifyPrompt } from '../prompts/verify';
 import { logTokenUsage } from './token-usage';
 
+const VERIFY_REASONING_EFFORT = 'low' as const;
+
 export interface VerifyMessageOptions {
   authorName?: string;
   chatTitle?: string;
@@ -35,6 +37,11 @@ export async function verifyMessageContent(message: string, options: VerifyMessa
     system: verifyPrompt,
     tools: {
       web_search: webSearchTool,
+    },
+    providerOptions: {
+      xai: {
+        reasoningEffort: VERIFY_REASONING_EFFORT,
+      },
     },
     messages: [{ role: 'user', content: userContent }],
   });
