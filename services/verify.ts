@@ -5,7 +5,7 @@ import { GROK_MODEL } from '../constants';
 import { verifyPrompt } from '../prompts/verify';
 import { logTokenUsage } from './token-usage';
 
-const VERIFY_REASONING_EFFORT = 'low' as const;
+const VERIFY_REASONING_EFFORT = 'medium' as const;
 
 export interface VerifyMessageOptions {
   authorName?: string;
