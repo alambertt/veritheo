@@ -17,6 +17,7 @@ type QueueWorkerOptions = {
   maxAttempts?: number;
   pollIntervalMs?: number;
   onError?: (context: string, error: unknown) => Promise<void> | void;
+  onResponse?: (payload: { job: LlmJob; text?: string; sourcesMessage?: string }) => Promise<void> | void;
 };
 
 async function sendAndPersistMessage(
@@ -53,7 +54,7 @@ async function sendAndPersistMessage(
   }
 }
 
-async function processJob(bot: Bot, db: Database, job: LlmJob) {
+async function processJob(bot: Bot, db: Database, job: LlmJob, options: QueueWorkerOptions = {}) {
   if (job.kind === 'verify') {
     const authorName = job.context_messages[0]?.trim() || undefined;
     const chatTitle = job.context_messages[1]?.trim() || undefined;
@@ -90,6 +91,10 @@ async function processJob(bot: Bot, db: Database, job: LlmJob) {
       replyToMessageId: job.request_message_id,
     });
   }
+
+  if (job.kind === 'ask' && options.onResponse) {
+    await options.onResponse({ job, text, sourcesMessage });
+  }
 }
 
 export function startLlmQueueWorker(bot: Bot, db: Database, options: QueueWorkerOptions = {}) {
@@ -125,7 +130,7 @@ export function startLlmQueueWorker(bot: Bot, db: Database, options: QueueWorker
 
         void (async () => {
           try {
-            await processJob(bot, db, job);
+            await processJob(bot, db, job, options);
             markLlmJobDone(db, job.id);
           } catch (error) {
             const details = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
