@@ -1,6 +1,6 @@
 import { google } from '@ai-sdk/google';
 import { generateText } from 'ai';
-import { GOOGLE_MODEL_PRO } from '../constants';
+import { GOOGLE_MODEL_BASIC } from '../constants';
 import { roastPrompt } from '../prompts/roast';
 import { logTokenUsage } from './token-usage';
 
@@ -29,7 +29,7 @@ export async function roastMessageContent(message: string, options: RoastOptions
     .join('\n');
 
   const { text, usage } = await generateText({
-    model: google(GOOGLE_MODEL_PRO),
+    model: google(GOOGLE_MODEL_BASIC),
     system: roastPrompt,
     messages: [{ role: 'user', content: userContent }],
   });

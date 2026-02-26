@@ -673,5 +673,26 @@ console.log('Starting bot...');
 sendChannelLog('🚀 Bot starting...');
 startLlmQueueWorker(bot, database, {
   onError: notifyError,
+  onResponse: async ({ job, text, sourcesMessage }) => {
+    if (job.kind !== 'ask') {
+      return;
+    }
+
+    const lines = [
+      '🧠 /ask response',
+      `JobId: ${job.id}`,
+      `ChatId: ${job.chat_id}`,
+      `RequestMessageId: ${job.request_message_id}`,
+      `Question: ${job.question}`,
+      'Response:',
+      text?.trim() || '[empty]',
+    ];
+
+    if (sourcesMessage?.trim()) {
+      lines.push('Sources:', sourcesMessage.trim());
+    }
+
+    await sendChannelLog(lines.join('\n'));
+  },
 });
 bot.start();
