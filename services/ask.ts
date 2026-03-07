@@ -13,15 +13,37 @@ function buildAskMessages(question: string, messagesContext?: string[]) {
   ];
 }
 
+function collectErrorDetails(error: unknown): string {
+  if (error instanceof Error) {
+    const segments = [error.name, error.message];
+
+    if ('cause' in error && error.cause) {
+      segments.push(collectErrorDetails(error.cause));
+    }
+
+    return segments.filter(Boolean).join(' ');
+  }
+
+  return String(error);
+}
+
 function isGoogleTransientFailure(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
+  const normalizedMessage = collectErrorDetails(error).toLowerCase();
 
   return (
-    message.includes('AI_RetryError') ||
-    message.includes('high demand') ||
-    message.includes('Please try again later') ||
-    message.includes('RESOURCE_EXHAUSTED') ||
-    message.includes('429')
+    normalizedMessage.includes('ai_retryerror') ||
+    normalizedMessage.includes('high demand') ||
+    normalizedMessage.includes('please try again later') ||
+    normalizedMessage.includes('resource_exhausted') ||
+    normalizedMessage.includes('cannot connect to api') ||
+    normalizedMessage.includes('socket connection was closed unexpectedly') ||
+    normalizedMessage.includes('socket hang up') ||
+    normalizedMessage.includes('fetch failed') ||
+    normalizedMessage.includes('network') ||
+    normalizedMessage.includes('econnreset') ||
+    normalizedMessage.includes('etimedout') ||
+    normalizedMessage.includes('eai_again') ||
+    /\b(408|409|425|429|500|502|503|504)\b/.test(normalizedMessage)
   );
 }
 

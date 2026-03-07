@@ -2,9 +2,16 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 const calls: Array<Record<string, unknown>> = [];
 let generatedText = 'mocked text result';
+let generateTextImpl: ((params: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined;
 
 mock.module('ai', () => ({
   generateText: async (params: Record<string, unknown>) => {
+    if (generateTextImpl) {
+      const result = await generateTextImpl(params);
+      calls.push(params);
+      return result;
+    }
+
     calls.push(params);
     return {
       text: generatedText,
@@ -27,6 +34,15 @@ mock.module('@ai-sdk/google', () => ({
   }),
 }));
 
+mock.module('@ai-sdk/xai', () => ({
+  xai: {
+    responses: (model: string) => ({ model, provider: 'xai' }),
+    tools: {
+      webSearch: () => 'mock-web-search-tool',
+    },
+  },
+}));
+
 import { askHandler } from '../services/ask';
 import { detectMessageFallacies } from '../services/fallacy-detector';
 import { detectUserHeresy } from '../services/heresy';
@@ -38,6 +54,7 @@ describe('AI-backed services', () => {
   beforeEach(() => {
     calls.length = 0;
     generatedText = 'mocked text result';
+    generateTextImpl = undefined;
   });
 
   it('returns ask handler results with metadata', async () => {
@@ -47,6 +64,36 @@ describe('AI-backed services', () => {
     expect(result.sources).toEqual([{ sourceType: 'url', url: 'https://example.com' }]);
     expect(result.groundingMetadata).toEqual({ foo: 'bar' });
     expect(result.safetyRatings).toEqual(['safe']);
+  });
+
+  it('falls back to grok when google fails with a transient socket error', async () => {
+    let invocation = 0;
+    generateTextImpl = async params => {
+      invocation += 1;
+
+      if (invocation === 1) {
+        throw new Error(
+          'AI_APICallError: Cannot connect to API: The socket connection was closed unexpectedly.'
+        );
+      }
+
+      return {
+        text: 'fallback answer',
+        sources: [{ sourceType: 'url', url: 'https://fallback.example.com' }],
+        providerMetadata: {
+          xai: {
+            foo: 'bar',
+          },
+        },
+      };
+    };
+
+    const result = await askHandler('Question?');
+
+    expect(result.text).toBe('fallback answer');
+    expect(result.sources).toEqual([{ sourceType: 'url', url: 'https://fallback.example.com' }]);
+    expect(invocation).toBe(2);
+    expect(calls).toHaveLength(1);
   });
 
   it('builds verification prompt with optional context', async () => {
