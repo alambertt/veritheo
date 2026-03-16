@@ -1,7 +1,7 @@
-import { Database, Statement } from 'bun:sqlite';
-import type { Chat, Message, User } from 'grammy/types';
+import { Database, Statement } from "bun:sqlite";
+import type { Chat, Message, User } from "grammy/types";
 
-const DATABASE_NAME = 'veritheo.sqlite';
+const DATABASE_NAME = "veritheo.sqlite";
 
 const CREATE_MESSAGES_TABLE = `
   CREATE TABLE IF NOT EXISTS messages (
@@ -135,8 +135,8 @@ export interface HeresyCacheEntry {
   response: string;
 }
 
-export type LlmJobKind = 'ask' | 'ask_group' | 'verify';
-export type LlmJobStatus = 'pending' | 'processing' | 'done' | 'failed';
+export type LlmJobKind = "ask" | "ask_group" | "verify";
+export type LlmJobStatus = "pending" | "processing" | "done" | "failed";
 
 export interface LlmJob {
   id: number;
@@ -152,16 +152,16 @@ export interface LlmJob {
   last_error?: string;
 }
 
-function mapChat(chat: Chat): TelegramRawMessage['chat'] {
+function mapChat(chat: Chat): TelegramRawMessage["chat"] {
   return {
     id: chat.id,
     type: chat.type,
-    title: 'title' in chat ? chat.title : undefined,
-    username: 'username' in chat ? chat.username : undefined,
+    title: "title" in chat ? chat.title : undefined,
+    username: "username" in chat ? chat.username : undefined,
   };
 }
 
-function mapUser(user: User | undefined): TelegramRawMessage['from'] {
+function mapUser(user: User | undefined): TelegramRawMessage["from"] {
   if (!user) {
     return undefined;
   }
@@ -200,7 +200,9 @@ export function mapToTelegramRawMessage(message: Message): TelegramRawMessage {
   };
 }
 
-export function buildTelegramMessageRecord(message: TelegramRawMessage): TelegramMessageRecord {
+export function buildTelegramMessageRecord(
+  message: TelegramRawMessage,
+): TelegramMessageRecord {
   return {
     message_id: message.message_id,
     chat_id: message.chat.id,
@@ -218,7 +220,10 @@ export function buildTelegramMessageRecord(message: TelegramRawMessage): Telegra
   };
 }
 
-export function storeTelegramMessage(db: Database, message: TelegramMessageRecord) {
+export function storeTelegramMessage(
+  db: Database,
+  message: TelegramMessageRecord,
+) {
   if (!insertMessageStatement) {
     insertMessageStatement = db.query(`
       INSERT INTO messages (
@@ -260,7 +265,8 @@ export function storeTelegramMessage(db: Database, message: TelegramMessageRecor
     $chat_title: message.chat_title ?? null,
     $chat_username: message.chat_username ?? null,
     $from_id: message.from_id ?? null,
-    $from_is_bot: message.from_is_bot === undefined ? null : message.from_is_bot ? 1 : 0,
+    $from_is_bot:
+      message.from_is_bot === undefined ? null : message.from_is_bot ? 1 : 0,
     $from_first_name: message.from_first_name ?? null,
     $from_last_name: message.from_last_name ?? null,
     $from_username: message.from_username ?? null,
@@ -268,7 +274,9 @@ export function storeTelegramMessage(db: Database, message: TelegramMessageRecor
     $date: message.date,
     $raw: message.raw ? JSON.stringify(message.raw) : null,
   });
-  console.log(`✅ Message stored: ${message.message_id} in chat ${message.chat_id} from ${message.from_id}`);
+  console.log(
+    `✅ Message stored: ${message.message_id} in chat ${message.chat_id} from ${message.from_id}`,
+  );
 }
 
 export interface MessageQueryOptions {
@@ -280,12 +288,12 @@ export interface MessageQueryOptions {
   untilDate?: number;
   limit?: number;
   offset?: number;
-  order?: 'asc' | 'desc';
+  order?: "asc" | "desc";
 }
 
 function mapStoredMessageRow(row: any): StoredTelegramMessage {
   let raw: unknown = null;
-  if (typeof row.raw === 'string' && row.raw.length > 0) {
+  if (typeof row.raw === "string" && row.raw.length > 0) {
     try {
       raw = JSON.parse(row.raw);
     } catch {
@@ -301,7 +309,8 @@ function mapStoredMessageRow(row: any): StoredTelegramMessage {
     chat_title: row.chat_title ?? undefined,
     chat_username: row.chat_username ?? undefined,
     from_id: row.from_id ?? undefined,
-    from_is_bot: row.from_is_bot === null ? undefined : Boolean(row.from_is_bot),
+    from_is_bot:
+      row.from_is_bot === null ? undefined : Boolean(row.from_is_bot),
     from_first_name: row.from_first_name ?? undefined,
     from_last_name: row.from_last_name ?? undefined,
     from_username: row.from_username ?? undefined,
@@ -314,11 +323,11 @@ function mapStoredMessageRow(row: any): StoredTelegramMessage {
 export function getMessagesByChat(
   db: Database,
   chatId: number,
-  options: { limit?: number; offset?: number; order?: 'asc' | 'desc' } = {}
+  options: { limit?: number; offset?: number; order?: "asc" | "desc" } = {},
 ): StoredTelegramMessage[] {
   const limit = options.limit ?? 100;
   const offset = options.offset ?? 0;
-  const order = options.order ?? 'desc';
+  const order = options.order ?? "desc";
 
   const query = db.query(
     `
@@ -327,7 +336,7 @@ export function getMessagesByChat(
       WHERE chat_id = $chat_id
       ORDER BY date ${order.toUpperCase()}
       LIMIT $limit OFFSET $offset
-    `
+    `,
   );
 
   const rows = query.all({
@@ -344,7 +353,7 @@ export function getUserMessagesForHeresy(
   chatId: number,
   userId: number,
   sinceDate: number,
-  options: { limit?: number; minLength?: number } = {}
+  options: { limit?: number; minLength?: number } = {},
 ): StoredTelegramMessage[] {
   const limit = options.limit ?? 50;
   const minLength = options.minLength ?? 100;
@@ -361,7 +370,7 @@ export function getUserMessagesForHeresy(
         AND (from_is_bot IS NULL OR from_is_bot = 0)
       ORDER BY LENGTH(text) DESC
       LIMIT $limit
-    `
+    `,
   );
 
   const rows = query.all({
@@ -380,7 +389,7 @@ export function getUserMessagesForHeresy(
 export function getHeresyCacheEntry(
   db: Database,
   chatId: number,
-  userId: number
+  userId: number,
 ): HeresyCacheEntry | undefined {
   const query = db.query(
     `
@@ -389,7 +398,7 @@ export function getHeresyCacheEntry(
       WHERE chat_id = $chat_id AND user_id = $user_id
       ORDER BY created_at DESC
       LIMIT 1
-    `
+    `,
   );
 
   const row: any = query.get({
@@ -412,7 +421,7 @@ export function getHeresyCacheEntry(
 
 export function storeHeresyCacheEntry(
   db: Database,
-  entry: Omit<HeresyCacheEntry, 'id'>
+  entry: Omit<HeresyCacheEntry, "id">,
 ): void {
   const query = db.query(
     `
@@ -427,7 +436,7 @@ export function storeHeresyCacheEntry(
         $created_at,
         $response
       )
-    `
+    `,
   );
 
   query.run({
@@ -438,44 +447,48 @@ export function storeHeresyCacheEntry(
   });
 }
 
-export function queryMessages(db: Database, criteria: MessageQueryOptions = {}): StoredTelegramMessage[] {
+export function queryMessages(
+  db: Database,
+  criteria: MessageQueryOptions = {},
+): StoredTelegramMessage[] {
   const conditions: string[] = [];
   const params: Record<string, unknown> = {};
 
   if (criteria.chatId !== undefined) {
-    conditions.push('chat_id = $chat_id');
+    conditions.push("chat_id = $chat_id");
     params.$chat_id = criteria.chatId;
   }
 
   if (criteria.fromId !== undefined) {
-    conditions.push('from_id = $from_id');
+    conditions.push("from_id = $from_id");
     params.$from_id = criteria.fromId;
   }
 
   if (criteria.fromIsBot !== undefined) {
-    conditions.push('from_is_bot = $from_is_bot');
+    conditions.push("from_is_bot = $from_is_bot");
     params.$from_is_bot = criteria.fromIsBot ? 1 : 0;
   }
 
   if (criteria.textLike) {
-    conditions.push('text LIKE $text_like');
+    conditions.push("text LIKE $text_like");
     params.$text_like = `%${criteria.textLike}%`;
   }
 
   if (criteria.sinceDate !== undefined) {
-    conditions.push('date >= $since_date');
+    conditions.push("date >= $since_date");
     params.$since_date = criteria.sinceDate;
   }
 
   if (criteria.untilDate !== undefined) {
-    conditions.push('date <= $until_date');
+    conditions.push("date <= $until_date");
     params.$until_date = criteria.untilDate;
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limit = criteria.limit ?? 100;
   const offset = criteria.offset ?? 0;
-  const order = (criteria.order ?? 'desc').toUpperCase();
+  const order = (criteria.order ?? "desc").toUpperCase();
 
   const query = db.query(
     `
@@ -484,7 +497,7 @@ export function queryMessages(db: Database, criteria: MessageQueryOptions = {}):
       ${whereClause}
       ORDER BY date ${order}
       LIMIT $limit OFFSET $offset
-    `
+    `,
   );
 
   const rows = query.all({
@@ -499,7 +512,7 @@ export function queryMessages(db: Database, criteria: MessageQueryOptions = {}):
 export function getMessageByChatAndMessageId(
   db: Database,
   chatId: number,
-  messageId: number
+  messageId: number,
 ): StoredTelegramMessage | undefined {
   const query = db.query(
     `
@@ -507,7 +520,7 @@ export function getMessageByChatAndMessageId(
       FROM messages
       WHERE chat_id = $chat_id AND message_id = $message_id
       LIMIT 1
-    `
+    `,
   );
 
   const row = query.get({
@@ -602,7 +615,7 @@ export function enqueueLlmJob(
     question: string;
     contextMessages?: string[];
     availableAt?: number;
-  }
+  },
 ): number {
   const now = Math.floor(Date.now() / 1000);
   const query = db.query(
@@ -630,7 +643,7 @@ export function enqueueLlmJob(
         0,
         NULL
       )
-    `
+    `,
   );
 
   const result = query.run({
@@ -638,7 +651,9 @@ export function enqueueLlmJob(
     $chat_id: params.chatId,
     $request_message_id: params.requestMessageId,
     $question: params.question,
-    $context_messages_json: params.contextMessages ? JSON.stringify(params.contextMessages) : null,
+    $context_messages_json: params.contextMessages
+      ? JSON.stringify(params.contextMessages)
+      : null,
     $created_at: now,
     $available_at: params.availableAt ?? now,
   });
@@ -654,21 +669,24 @@ export function requeueStuckLlmJobs(db: Database): number {
       SET status = 'pending',
           available_at = $now
       WHERE status = 'processing'
-    `
+    `,
   );
   const result = query.run({ $now: now });
   return result.changes;
 }
 
-export function claimNextLlmJob(db: Database, lockedChatIds: number[] = []): LlmJob | undefined {
+export function claimNextLlmJob(
+  db: Database,
+  lockedChatIds: number[] = [],
+): LlmJob | undefined {
   const now = Math.floor(Date.now() / 1000);
   const normalizedLockedChatIds = lockedChatIds
-    .filter(chatId => Number.isSafeInteger(chatId))
-    .map(chatId => Number(chatId));
+    .filter((chatId) => Number.isSafeInteger(chatId))
+    .map((chatId) => Number(chatId));
   const lockFilter =
     normalizedLockedChatIds.length > 0
-      ? `AND j.chat_id NOT IN (${normalizedLockedChatIds.join(', ')})`
-      : '';
+      ? `AND j.chat_id NOT IN (${normalizedLockedChatIds.join(", ")})`
+      : "";
 
   const query = db.query(
     `
@@ -685,7 +703,7 @@ export function claimNextLlmJob(db: Database, lockedChatIds: number[] = []): Llm
         )
       ORDER BY j.created_at ASC, j.id ASC
       LIMIT 1
-    `
+    `,
   );
 
   const candidate: any = query.get({ $now: now });
@@ -701,7 +719,7 @@ export function claimNextLlmJob(db: Database, lockedChatIds: number[] = []): Llm
           last_error = NULL
       WHERE id = $id
         AND status = 'pending'
-    `
+    `,
   );
   const claimResult = claimQuery.run({ $id: candidate.id });
   if (claimResult.changes === 0) {
@@ -715,7 +733,7 @@ export function claimNextLlmJob(db: Database, lockedChatIds: number[] = []): Llm
         FROM llm_jobs
         WHERE id = $id
         LIMIT 1
-      `
+      `,
     )
     .get({ $id: candidate.id });
 
@@ -730,7 +748,7 @@ export function markLlmJobDone(db: Database, jobId: number): void {
           available_at = CAST(strftime('%s','now') AS INTEGER),
           last_error = NULL
       WHERE id = $id
-    `
+    `,
   ).run({ $id: jobId });
 }
 
@@ -741,7 +759,7 @@ export function markLlmJobFailed(
     error: string;
     retryInSeconds?: number;
     maxAttempts?: number;
-  }
+  },
 ): void {
   const row: any = db
     .query(
@@ -750,7 +768,7 @@ export function markLlmJobFailed(
         FROM llm_jobs
         WHERE id = $id
         LIMIT 1
-      `
+      `,
     )
     .get({ $id: params.jobId });
 
@@ -771,16 +789,19 @@ export function markLlmJobFailed(
           available_at = $available_at,
           last_error = $last_error
       WHERE id = $id
-    `
+    `,
   ).run({
-    $status: shouldRetry ? 'pending' : 'failed',
+    $status: shouldRetry ? "pending" : "failed",
     $available_at: shouldRetry ? now + retryInSeconds : now,
     $last_error: params.error,
     $id: params.jobId,
   });
 }
 
-export function countPendingLlmJobsForChat(db: Database, chatId: number): number {
+export function countPendingLlmJobsForChat(
+  db: Database,
+  chatId: number,
+): number {
   const row: any = db
     .query(
       `
@@ -788,7 +809,7 @@ export function countPendingLlmJobsForChat(db: Database, chatId: number): number
         FROM llm_jobs
         WHERE chat_id = $chat_id
           AND status IN ('pending', 'processing')
-      `
+      `,
     )
     .get({ $chat_id: chatId });
 

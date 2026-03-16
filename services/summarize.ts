@@ -1,7 +1,7 @@
-import { google } from '@ai-sdk/google';
-import { generateText } from 'ai';
-import { GOOGLE_MODEL_BASIC } from '../constants';
-import { logTokenUsage } from './token-usage';
+import { google } from "@ai-sdk/google";
+import { generateText } from "ai";
+import { GOOGLE_MODEL_BASIC } from "../constants";
+import { logTokenUsage } from "./token-usage";
 
 const systemPrompt = `
 Eres un asistente especializado en crear resúmenes claros, fieles y concisos en español.
@@ -13,32 +13,37 @@ Debes:
 - Si el texto ya es muy breve, devuelve una paráfrasis condensada sin añadir información nueva.
 `;
 
-export async function summarizeText(text: string, limitChars = 4000): Promise<string> {
+export async function summarizeText(
+  text: string,
+  limitChars = 4000,
+): Promise<string> {
   if (!text.trim()) {
-    return '';
+    return "";
   } else if (text.length <= limitChars) {
     return text;
   }
 
   const { text: summaryCandidate, usage } = await generateText({
     model: google(GOOGLE_MODEL_BASIC),
-    system: systemPrompt.replace('{{limit}}', String(limitChars)),
+    system: systemPrompt.replace("{{limit}}", String(limitChars)),
     messages: [
       {
-        role: 'user',
+        role: "user",
         content: [
           `Redacta un resumen en español que no supere ${limitChars} caracteres (incluyendo espacios).`,
-          'Conserva la intención original y señala relaciones clave entre ideas.',
-          'Texto a resumir:',
+          "Conserva la intención original y señala relaciones clave entre ideas.",
+          "Texto a resumir:",
           text,
-        ].join('\n\n'),
+        ].join("\n\n"),
       },
     ],
   });
-  logTokenUsage('/summarize', usage);
+  logTokenUsage("/summarize", usage);
 
   if (!summaryCandidate) {
-    return text.length > limitChars ? `${text.slice(0, limitChars - 1)}…` : text;
+    return text.length > limitChars
+      ? `${text.slice(0, limitChars - 1)}…`
+      : text;
   }
 
   // Garantiza el límite duro de caracteres aun si el modelo se excede.

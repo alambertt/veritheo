@@ -208,7 +208,10 @@ export function startLlmQueueWorker(
             await processJob(bot, db, job, options);
             markLlmJobDone(db, job.id);
           } catch (error) {
-            const details = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+            const details =
+              error instanceof Error
+                ? `${error.name}: ${error.message}`
+                : String(error);
             markLlmJobFailed(db, {
               jobId: job.id,
               error: details,
@@ -223,14 +226,17 @@ export function startLlmQueueWorker(
                   replyToMessageId: job.request_message_id,
                 });
               } catch (sendError) {
-                console.error('Failed to send final queue failure message:', sendError);
+                console.error(
+                  "Failed to send final queue failure message:",
+                  sendError,
+                );
               }
             }
 
             if (options.onError) {
               await options.onError(
                 `LLM queue job failed (jobId=${job.id}, kind=${job.kind}, chatId=${job.chat_id}, attempts=${job.attempts})`,
-                error
+                error,
               );
             }
           } finally {

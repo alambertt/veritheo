@@ -1,4 +1,4 @@
-import type { Context } from 'grammy';
+import type { Context } from "grammy";
 
 const TELEGRAM_TYPING_REFRESH_INTERVAL_MS = 4500;
 
@@ -13,13 +13,16 @@ export function startTypingIndicator(ctx: Context): () => void {
 
   const sendTypingAction = () => {
     ctx.api
-      .sendChatAction(chatId, 'typing')
-      .catch(error => {
-        console.error('Failed to send typing action:', error);
+      .sendChatAction(chatId, "typing")
+      .catch((error) => {
+        console.error("Failed to send typing action:", error);
       })
       .finally(() => {
         if (!stopped) {
-          timeout = setTimeout(sendTypingAction, TELEGRAM_TYPING_REFRESH_INTERVAL_MS);
+          timeout = setTimeout(
+            sendTypingAction,
+            TELEGRAM_TYPING_REFRESH_INTERVAL_MS,
+          );
         }
       });
   };

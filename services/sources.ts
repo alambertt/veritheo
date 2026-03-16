@@ -5,7 +5,7 @@ type AskSource = {
 };
 
 function escapeMarkdown(text: string): string {
-  return text.replace(/([\\*_`\[\]\(\)])/g, '\\$1');
+  return text.replace(/([\\*_`\[\]\(\)])/g, "\\$1");
 }
 
 export function buildSourcesMessage(sources: unknown): string | undefined {
@@ -17,12 +17,12 @@ export function buildSourcesMessage(sources: unknown): string | undefined {
   const formattedSources: { title: string; url: string }[] = [];
 
   for (const rawSource of sources) {
-    if (!rawSource || typeof rawSource !== 'object') {
+    if (!rawSource || typeof rawSource !== "object") {
       continue;
     }
 
     const { sourceType, url, title } = rawSource as AskSource;
-    if (sourceType !== 'url' || typeof url !== 'string') {
+    if (sourceType !== "url" || typeof url !== "string") {
       continue;
     }
 
@@ -33,7 +33,10 @@ export function buildSourcesMessage(sources: unknown): string | undefined {
 
     seenUrls.add(trimmedUrl);
 
-    let displayTitle = typeof title === 'string' && title.trim() !== '' ? title.trim() : undefined;
+    let displayTitle =
+      typeof title === "string" && title.trim() !== ""
+        ? title.trim()
+        : undefined;
     if (!displayTitle) {
       try {
         const parsedUrl = new URL(trimmedUrl);
@@ -53,7 +56,13 @@ export function buildSourcesMessage(sources: unknown): string | undefined {
     return undefined;
   }
 
-  const lines = formattedSources.map(({ title, url }) => `- [${title}](${url})`);
+  const lines = formattedSources.map(
+    ({ title, url }) => `- [${title}](${url})`,
+  );
 
-  return ['🙏 Gracias por tu pregunta. Aquí encuentras las fuentes consultadas:', '', ...lines].join('\n');
+  return [
+    "🙏 Gracias por tu pregunta. Aquí encuentras las fuentes consultadas:",
+    "",
+    ...lines,
+  ].join("\n");
 }

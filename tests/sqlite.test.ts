@@ -1,33 +1,34 @@
-import { Database } from 'bun:sqlite';
-import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { Database } from "bun:sqlite";
+import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import {
   buildTelegramMessageRecord,
   getHeresyCacheEntry,
   getMessageByChatAndMessageId,
   getMessagesByChat,
+  getReplyChainMessages,
   getUserMessagesForHeresy,
   mapToTelegramRawMessage,
   queryMessages,
   setupSchema,
   storeHeresyCacheEntry,
   storeTelegramMessage,
-} from '../services/sqlite';
+} from "../services/sqlite";
 
-describe('sqlite message storage', () => {
-  const db = new Database(':memory:');
+describe("sqlite message storage", () => {
+  const db = new Database(":memory:");
 
   beforeAll(() => {
     setupSchema(db);
   });
 
   beforeEach(() => {
-    db.run('DELETE FROM messages');
-    db.run('DELETE FROM heresy_cache');
+    db.run("DELETE FROM messages");
+    db.run("DELETE FROM heresy_cache");
   });
 
-  it('stores messages and filters by chat and bot flag', () => {
+  it("stores messages and filters by chat and bot flag", () => {
     const base = {
-      chat: { id: 42, type: 'group' },
+      chat: { id: 42, type: "group" },
       date: 1_700_000_000,
     };
 
@@ -36,8 +37,8 @@ describe('sqlite message storage', () => {
       buildTelegramMessageRecord({
         ...base,
         message_id: 1,
-        from: { id: 10, is_bot: true, first_name: 'Bot' },
-        text: 'Hello there',
+        from: { id: 10, is_bot: true, first_name: "Bot" },
+        text: "Hello there",
       }),
     );
 
@@ -46,8 +47,8 @@ describe('sqlite message storage', () => {
       buildTelegramMessageRecord({
         ...base,
         message_id: 2,
-        from: { id: 11, is_bot: false, first_name: 'Human' },
-        text: 'Hi',
+        from: { id: 11, is_bot: false, first_name: "Human" },
+        text: "Hi",
       }),
     );
 
@@ -153,14 +154,14 @@ describe('sqlite message storage', () => {
     expect(filtered[0]?.message_id).toBe(10);
   });
 
-  it('returns messages by chat with pagination defaults', () => {
+  it("returns messages by chat with pagination defaults", () => {
     storeTelegramMessage(
       db,
       buildTelegramMessageRecord({
         message_id: 21,
-        chat: { id: 12, type: 'group' },
+        chat: { id: 12, type: "group" },
         date: 1_700_000_700,
-        text: 'First',
+        text: "First",
       }),
     );
 
@@ -169,20 +170,60 @@ describe('sqlite message storage', () => {
     expect(messages[0]?.message_id).toBe(21);
   });
 
-  describe('getUserMessagesForHeresy', () => {
-    it('returns only long non-bot messages from the given user since a date', () => {
+  it("returns reply chain messages in chronological order", () => {
+    storeTelegramMessage(
+      db,
+      buildTelegramMessageRecord({
+        message_id: 30,
+        chat: { id: 13, type: "group" },
+        from: { id: 1, is_bot: false, first_name: "User" },
+        date: 1_700_000_800,
+        text: "Question",
+      }),
+    );
+
+    storeTelegramMessage(
+      db,
+      buildTelegramMessageRecord({
+        message_id: 31,
+        reply_to_message_id: 30,
+        chat: { id: 13, type: "group" },
+        from: { id: 2, is_bot: true, first_name: "Veritheo" },
+        date: 1_700_000_900,
+        text: "Answer",
+      }),
+    );
+
+    storeTelegramMessage(
+      db,
+      buildTelegramMessageRecord({
+        message_id: 32,
+        reply_to_message_id: 31,
+        chat: { id: 13, type: "group" },
+        from: { id: 1, is_bot: false, first_name: "User" },
+        date: 1_700_001_000,
+        text: "Follow-up",
+      }),
+    );
+
+    const chain = getReplyChainMessages(db, 13, 32);
+    expect(chain.map((message) => message.message_id)).toEqual([30, 31, 32]);
+  });
+
+  describe("getUserMessagesForHeresy", () => {
+    it("returns only long non-bot messages from the given user since a date", () => {
       const chatId = 100;
       const userId = 200;
       const sinceDate = 1_700_000_000;
-      const longText = 'A'.repeat(150);
+      const longText = "A".repeat(150);
 
       // matching message: right user, long text, after sinceDate
       storeTelegramMessage(
         db,
         buildTelegramMessageRecord({
           message_id: 1,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate + 100,
           text: longText,
         }),
@@ -193,10 +234,10 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 2,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate + 200,
-          text: 'Short',
+          text: "Short",
         }),
       );
 
@@ -205,8 +246,8 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 3,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: true, first_name: 'Bot' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: true, first_name: "Bot" },
           date: sinceDate + 300,
           text: longText,
         }),
@@ -217,8 +258,8 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 4,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate - 100,
           text: longText,
         }),
@@ -229,8 +270,8 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 5,
-          chat: { id: chatId, type: 'group' },
-          from: { id: 999, is_bot: false, first_name: 'Other' },
+          chat: { id: chatId, type: "group" },
+          from: { id: 999, is_bot: false, first_name: "Other" },
           date: sinceDate + 400,
           text: longText,
         }),
@@ -241,8 +282,8 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 6,
-          chat: { id: 777, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: 777, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate + 500,
           text: longText,
         }),
@@ -253,30 +294,32 @@ describe('sqlite message storage', () => {
       expect(results[0]?.message_id).toBe(1);
     });
 
-    it('respects the limit parameter', () => {
+    it("respects the limit parameter", () => {
       const chatId = 101;
       const userId = 201;
       const sinceDate = 1_700_000_000;
-      const longText = 'B'.repeat(150);
+      const longText = "B".repeat(150);
 
       for (let i = 0; i < 5; i++) {
         storeTelegramMessage(
           db,
           buildTelegramMessageRecord({
             message_id: 100 + i,
-            chat: { id: chatId, type: 'group' },
-            from: { id: userId, is_bot: false, first_name: 'Human' },
+            chat: { id: chatId, type: "group" },
+            from: { id: userId, is_bot: false, first_name: "Human" },
             date: sinceDate + i * 100,
             text: longText,
           }),
         );
       }
 
-      const results = getUserMessagesForHeresy(db, chatId, userId, sinceDate, { limit: 2 });
+      const results = getUserMessagesForHeresy(db, chatId, userId, sinceDate, {
+        limit: 2,
+      });
       expect(results).toHaveLength(2);
     });
 
-    it('respects the minLength parameter', () => {
+    it("respects the minLength parameter", () => {
       const chatId = 102;
       const userId = 202;
       const sinceDate = 1_700_000_000;
@@ -285,10 +328,10 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 200,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate + 100,
-          text: 'C'.repeat(50),
+          text: "C".repeat(50),
         }),
       );
 
@@ -296,24 +339,26 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 201,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate + 200,
-          text: 'D'.repeat(200),
+          text: "D".repeat(200),
         }),
       );
 
-      const results = getUserMessagesForHeresy(db, chatId, userId, sinceDate, { minLength: 100 });
+      const results = getUserMessagesForHeresy(db, chatId, userId, sinceDate, {
+        minLength: 100,
+      });
       expect(results).toHaveLength(1);
       expect(results[0]?.message_id).toBe(201);
     });
 
-    it('returns empty array when no messages match', () => {
+    it("returns empty array when no messages match", () => {
       const results = getUserMessagesForHeresy(db, 999, 999, 0);
       expect(results).toHaveLength(0);
     });
 
-    it('excludes messages with null text', () => {
+    it("excludes messages with null text", () => {
       const chatId = 103;
       const userId = 203;
       const sinceDate = 1_700_000_000;
@@ -322,8 +367,8 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 300,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate + 100,
           text: undefined,
         }),
@@ -333,7 +378,7 @@ describe('sqlite message storage', () => {
       expect(results).toHaveLength(0);
     });
 
-    it('selects the longest messages, not the most recent', () => {
+    it("selects the longest messages, not the most recent", () => {
       const chatId = 104;
       const userId = 204;
       const sinceDate = 1_700_000_000;
@@ -343,10 +388,10 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 400,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate + 300,
-          text: 'E'.repeat(120),
+          text: "E".repeat(120),
         }),
       );
 
@@ -355,10 +400,10 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 401,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate + 100,
-          text: 'F'.repeat(500),
+          text: "F".repeat(500),
         }),
       );
 
@@ -367,20 +412,22 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 402,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate + 200,
-          text: 'G'.repeat(300),
+          text: "G".repeat(300),
         }),
       );
 
-      const results = getUserMessagesForHeresy(db, chatId, userId, sinceDate, { limit: 2 });
+      const results = getUserMessagesForHeresy(db, chatId, userId, sinceDate, {
+        limit: 2,
+      });
       expect(results).toHaveLength(2);
       // Should pick the two longest (500 and 300), not the most recent
-      expect(results.map(r => r.message_id)).toEqual([401, 402]);
+      expect(results.map((r) => r.message_id)).toEqual([401, 402]);
     });
 
-    it('returns results in chronological order (oldest first)', () => {
+    it("returns results in chronological order (oldest first)", () => {
       const chatId = 105;
       const userId = 205;
       const sinceDate = 1_700_000_000;
@@ -390,10 +437,10 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 500,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate + 300,
-          text: 'H'.repeat(400),
+          text: "H".repeat(400),
         }),
       );
 
@@ -401,10 +448,10 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 501,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate + 100,
-          text: 'I'.repeat(200),
+          text: "I".repeat(200),
         }),
       );
 
@@ -412,10 +459,10 @@ describe('sqlite message storage', () => {
         db,
         buildTelegramMessageRecord({
           message_id: 502,
-          chat: { id: chatId, type: 'group' },
-          from: { id: userId, is_bot: false, first_name: 'Human' },
+          chat: { id: chatId, type: "group" },
+          from: { id: userId, is_bot: false, first_name: "Human" },
           date: sinceDate + 200,
-          text: 'J'.repeat(300),
+          text: "J".repeat(300),
         }),
       );
 
@@ -428,13 +475,13 @@ describe('sqlite message storage', () => {
     });
   });
 
-  describe('heresy cache', () => {
-    it('stores and retrieves a cache entry', () => {
+  describe("heresy cache", () => {
+    it("stores and retrieves a cache entry", () => {
       storeHeresyCacheEntry(db, {
         chat_id: 1,
         user_id: 10,
         created_at: 1_700_000_000,
-        response: 'Eres un arriano moderno',
+        response: "Eres un arriano moderno",
       });
 
       const entry = getHeresyCacheEntry(db, 1, 10);
@@ -442,59 +489,59 @@ describe('sqlite message storage', () => {
       expect(entry?.chat_id).toBe(1);
       expect(entry?.user_id).toBe(10);
       expect(entry?.created_at).toBe(1_700_000_000);
-      expect(entry?.response).toBe('Eres un arriano moderno');
+      expect(entry?.response).toBe("Eres un arriano moderno");
     });
 
-    it('returns undefined when no cache entry exists', () => {
+    it("returns undefined when no cache entry exists", () => {
       const entry = getHeresyCacheEntry(db, 999, 999);
       expect(entry).toBeUndefined();
     });
 
-    it('returns the most recent entry when multiple exist', () => {
+    it("returns the most recent entry when multiple exist", () => {
       storeHeresyCacheEntry(db, {
         chat_id: 2,
         user_id: 20,
         created_at: 1_700_000_000,
-        response: 'Primera herejía',
+        response: "Primera herejía",
       });
 
       storeHeresyCacheEntry(db, {
         chat_id: 2,
         user_id: 20,
         created_at: 1_700_100_000,
-        response: 'Segunda herejía',
+        response: "Segunda herejía",
       });
 
       const entry = getHeresyCacheEntry(db, 2, 20);
-      expect(entry?.response).toBe('Segunda herejía');
+      expect(entry?.response).toBe("Segunda herejía");
       expect(entry?.created_at).toBe(1_700_100_000);
     });
 
-    it('isolates entries by chat_id and user_id', () => {
+    it("isolates entries by chat_id and user_id", () => {
       storeHeresyCacheEntry(db, {
         chat_id: 3,
         user_id: 30,
         created_at: 1_700_000_000,
-        response: 'Chat 3 User 30',
+        response: "Chat 3 User 30",
       });
 
       storeHeresyCacheEntry(db, {
         chat_id: 3,
         user_id: 31,
         created_at: 1_700_000_000,
-        response: 'Chat 3 User 31',
+        response: "Chat 3 User 31",
       });
 
       storeHeresyCacheEntry(db, {
         chat_id: 4,
         user_id: 30,
         created_at: 1_700_000_000,
-        response: 'Chat 4 User 30',
+        response: "Chat 4 User 30",
       });
 
-      expect(getHeresyCacheEntry(db, 3, 30)?.response).toBe('Chat 3 User 30');
-      expect(getHeresyCacheEntry(db, 3, 31)?.response).toBe('Chat 3 User 31');
-      expect(getHeresyCacheEntry(db, 4, 30)?.response).toBe('Chat 4 User 30');
+      expect(getHeresyCacheEntry(db, 3, 30)?.response).toBe("Chat 3 User 30");
+      expect(getHeresyCacheEntry(db, 3, 31)?.response).toBe("Chat 3 User 31");
+      expect(getHeresyCacheEntry(db, 4, 30)?.response).toBe("Chat 4 User 30");
       expect(getHeresyCacheEntry(db, 4, 31)).toBeUndefined();
     });
   });

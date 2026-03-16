@@ -31,33 +31,35 @@ import {
   mapToTelegramRawMessage,
   storeHeresyCacheEntry,
   storeTelegramMessage,
-} from './services/sqlite';
-import { findSimilarBotMessageInChat } from './services/self-message-guard';
-import { startTypingIndicator } from './services/typing-indicator';
-import { SIMILARITY_THRESHOLD } from './constants';
+} from "./services/sqlite";
+import { findSimilarBotMessageInChat } from "./services/self-message-guard";
+import { startTypingIndicator } from "./services/typing-indicator";
+import { SIMILARITY_THRESHOLD } from "./constants";
 
 config();
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {
-  throw new Error('TELEGRAM_BOT_TOKEN environment variable is not set');
+  throw new Error("TELEGRAM_BOT_TOKEN environment variable is not set");
 }
 
 const parseUserIdListEnv = (name: string): number[] => {
   const raw = process.env[name];
-  if (!raw || raw.trim() === '') {
+  if (!raw || raw.trim() === "") {
     return [];
   }
 
   const parts = raw
-    .split(',')
-    .map(part => part.trim())
+    .split(",")
+    .map((part) => part.trim())
     .filter(Boolean);
 
-  const ids = parts.map(part => {
+  const ids = parts.map((part) => {
     const parsed = Number(part);
     if (!Number.isSafeInteger(parsed)) {
-      throw new Error(`Invalid ${name} environment variable: "${part}" is not an integer user id`);
+      throw new Error(
+        `Invalid ${name} environment variable: "${part}" is not an integer user id`,
+      );
     }
     return parsed;
   });
@@ -67,12 +69,14 @@ const parseUserIdListEnv = (name: string): number[] => {
 
 const parseUserIdEnv = (name: string): number | undefined => {
   const raw = process.env[name];
-  if (!raw || raw.trim() === '') {
+  if (!raw || raw.trim() === "") {
     return undefined;
   }
   const parsed = Number(raw.trim());
   if (!Number.isSafeInteger(parsed)) {
-    throw new Error(`Invalid ${name} environment variable: "${raw}" is not an integer user id`);
+    throw new Error(
+      `Invalid ${name} environment variable: "${raw}" is not an integer user id`,
+    );
   }
   return parsed;
 };
@@ -80,12 +84,17 @@ const parseUserIdEnv = (name: string): number | undefined => {
 const bot = new Bot(token);
 const database = initializeDatabase();
 const DEFAULT_UNTOUCHABLE_USER_IDS: number[] = [];
-const configuredUntouchableUserIds = parseUserIdListEnv('UNTOUCHABLE_USER_IDS');
+const configuredUntouchableUserIds = parseUserIdListEnv("UNTOUCHABLE_USER_IDS");
 const UNTOUCHABLE_USER_IDS =
-  configuredUntouchableUserIds.length > 0 ? configuredUntouchableUserIds : DEFAULT_UNTOUCHABLE_USER_IDS;
-const configuredBannedUserId = parseUserIdEnv('BANNED_USER_ID');
+  configuredUntouchableUserIds.length > 0
+    ? configuredUntouchableUserIds
+    : DEFAULT_UNTOUCHABLE_USER_IDS;
+const configuredBannedUserId = parseUserIdEnv("BANNED_USER_ID");
 const BANNED_USER_IDS = Array.from(
-  new Set([...parseUserIdListEnv('BANNED_USER_IDS'), ...(configuredBannedUserId ? [configuredBannedUserId] : [])]),
+  new Set([
+    ...parseUserIdListEnv("BANNED_USER_IDS"),
+    ...(configuredBannedUserId ? [configuredBannedUserId] : []),
+  ]),
 );
 const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ?? undefined;
 
@@ -222,15 +231,17 @@ bot.use(async (ctx, next) => {
   await next();
 });
 
-bot.command('start', ctx => {
-  logCommandInvocation(ctx, '/start');
+bot.command("start", (ctx) => {
+  logCommandInvocation(ctx, "/start");
   ctx.reply(MESSAGES.start);
 });
 
-bot.command('ask', async ctx => {
+bot.command("ask", async (ctx) => {
   try {
-    const question = ctx.message?.text.split(' ').slice(1).join(' ');
-    logCommandInvocation(ctx, '/ask', [`Question: ${question?.trim() || '[none provided]'}`]);
+    const question = ctx.message?.text.split(" ").slice(1).join(" ");
+    logCommandInvocation(ctx, "/ask", [
+      `Question: ${question?.trim() || "[none provided]"}`,
+    ]);
     if (!question) {
       await ctx.reply(MESSAGES.askMissingQuestion);
       return;
@@ -243,7 +254,7 @@ bot.command('ask', async ctx => {
     }
 
     enqueueLlmJob(database, {
-      kind: 'ask',
+      kind: "ask",
       chatId,
       requestMessageId,
       question: question.trim(),
@@ -253,22 +264,27 @@ bot.command('ask', async ctx => {
       reply_to_message_id: requestMessageId,
     });
   } catch (error) {
-    console.error('Failed to process /ask command:', error);
-    await notifyError(`Failed to process /ask command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
+    console.error("Failed to process /ask command:", error);
+    await notifyError(
+      `Failed to process /ask command (chatId=${ctx.chat?.id ?? "unknown"})`,
+      error,
+    );
     try {
       await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
     } catch (replyError) {
-      console.error('Failed to send /ask error message:', replyError);
-      await notifyError('Failed to send /ask error message', replyError);
+      console.error("Failed to send /ask error message:", replyError);
+      await notifyError("Failed to send /ask error message", replyError);
     }
   }
 });
 
-bot.command('ask_group', async ctx => {
+bot.command("ask_group", async (ctx) => {
   try {
-    const question = ctx.message?.text.split(' ').slice(1).join(' ').trim();
-    console.log('🚀 ~ question:', question);
-    logCommandInvocation(ctx, '/ask_group', [`Question: ${question || '[none provided]'}`]);
+    const question = ctx.message?.text.split(" ").slice(1).join(" ").trim();
+    console.log("🚀 ~ question:", question);
+    logCommandInvocation(ctx, "/ask_group", [
+      `Question: ${question || "[none provided]"}`,
+    ]);
     let contextMessages: string[] | undefined;
     const chatId = ctx.chat?.id;
 
@@ -278,10 +294,18 @@ bot.command('ask_group', async ctx => {
     }
 
     if (chatId) {
-      const storedMessages = getMessagesByChat(database, chatId, { limit: 10, order: 'desc' });
+      const storedMessages = getMessagesByChat(database, chatId, {
+        limit: 10,
+        order: "desc",
+      });
       const textMessages = storedMessages
-        .filter(msg => msg.text && msg.text.trim() !== '' && msg.message_id !== ctx.message?.message_id)
-        .map(msg => msg.text!.trim())
+        .filter(
+          (msg) =>
+            msg.text &&
+            msg.text.trim() !== "" &&
+            msg.message_id !== ctx.message?.message_id,
+        )
+        .map((msg) => msg.text!.trim())
         .reverse();
 
       if (textMessages.length > 0) {
@@ -296,7 +320,7 @@ bot.command('ask_group', async ctx => {
     }
 
     enqueueLlmJob(database, {
-      kind: 'ask_group',
+      kind: "ask_group",
       chatId,
       requestMessageId,
       question,
@@ -307,30 +331,35 @@ bot.command('ask_group', async ctx => {
       reply_to_message_id: requestMessageId,
     });
   } catch (error) {
-    console.error('Failed to process /ask_group command:', error);
-    await notifyError(`Failed to process /ask_group command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
+    console.error("Failed to process /ask_group command:", error);
+    await notifyError(
+      `Failed to process /ask_group command (chatId=${ctx.chat?.id ?? "unknown"})`,
+      error,
+    );
     try {
       await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
     } catch (replyError) {
-      console.error('Failed to send /ask_group error message:', replyError);
-      await notifyError('Failed to send /ask_group error message', replyError);
+      console.error("Failed to send /ask_group error message:", replyError);
+      await notifyError("Failed to send /ask_group error message", replyError);
     }
   }
 });
 
-bot.command('help', ctx => {
-  logCommandInvocation(ctx, '/help');
+bot.command("help", (ctx) => {
+  logCommandInvocation(ctx, "/help");
   ctx.reply(MESSAGES.help);
 });
 
-bot.command('persona', ctx => {
-  logCommandInvocation(ctx, '/persona');
+bot.command("persona", (ctx) => {
+  logCommandInvocation(ctx, "/persona");
   ctx.reply(MESSAGES.persona);
 });
 
-bot.command('verify', async ctx => {
+bot.command("verify", async (ctx) => {
   try {
-    logCommandInvocation(ctx, '/verify', [`ReplyToMessageId: ${ctx.message?.reply_to_message?.message_id ?? 'none'}`]);
+    logCommandInvocation(ctx, "/verify", [
+      `ReplyToMessageId: ${ctx.message?.reply_to_message?.message_id ?? "none"}`,
+    ]);
     if (!ctx.message?.reply_to_message || !ctx.chat?.id) {
       await ctx.reply(MESSAGES.verifyReplyRequired);
       return;

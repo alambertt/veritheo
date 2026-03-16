@@ -1,13 +1,13 @@
-import type { Database } from 'bun:sqlite';
-import { queryMessages } from './sqlite';
+import type { Database } from "bun:sqlite";
+import { queryMessages } from "./sqlite";
 
 function normalizeForSimilarity(text: string): string {
   return text
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -17,12 +17,16 @@ function wordNgrams(tokens: string[], n: number): string[] {
   }
   const grams: string[] = [];
   for (let index = 0; index <= tokens.length - n; index++) {
-    grams.push(tokens.slice(index, index + n).join('\u0001'));
+    grams.push(tokens.slice(index, index + n).join("\u0001"));
   }
   return grams;
 }
 
-function containmentCoefficient(promptText: string, candidateText: string, n = 5): number {
+function containmentCoefficient(
+  promptText: string,
+  candidateText: string,
+  n = 5,
+): number {
   if (!promptText || !candidateText) {
     return 0;
   }
@@ -30,8 +34,8 @@ function containmentCoefficient(promptText: string, candidateText: string, n = 5
     return 1;
   }
 
-  const promptTokens = promptText.split(' ').filter(Boolean);
-  const candidateTokens = candidateText.split(' ').filter(Boolean);
+  const promptTokens = promptText.split(" ").filter(Boolean);
+  const candidateTokens = candidateText.split(" ").filter(Boolean);
   const promptNgrams = wordNgrams(promptTokens, n);
   if (promptNgrams.length === 0) {
     return 0;
@@ -106,12 +110,13 @@ export function findSimilarBotMessageInChat(
     minPromptCharsForSubstring?: number;
     minPromptTokensForContainment?: number;
     containmentNgramSize?: number;
-  } = {}
+  } = {},
 ): { blocked: boolean; similarity: number; matchedMessageId?: number } {
   const threshold = options.threshold ?? 0.85;
   const containmentThreshold = options.containmentThreshold ?? threshold;
   const minPromptCharsForSubstring = options.minPromptCharsForSubstring ?? 40;
-  const minPromptTokensForContainment = options.minPromptTokensForContainment ?? 8;
+  const minPromptTokensForContainment =
+    options.minPromptTokensForContainment ?? 8;
   const pageSize = options.pageSize ?? 200;
   const maxMessagesToScan = options.maxMessagesToScan ?? 2000;
   const normalizedPrompt = normalizeForSimilarity(promptText);
@@ -120,7 +125,7 @@ export function findSimilarBotMessageInChat(
     return { blocked: false, similarity: 0 };
   }
 
-  const promptTokens = normalizedPrompt.split(' ').filter(Boolean);
+  const promptTokens = normalizedPrompt.split(" ").filter(Boolean);
   const containmentNgramSize =
     options.containmentNgramSize ??
     (promptTokens.length >= 20 ? 5 : promptTokens.length >= 12 ? 4 : 3);
@@ -133,8 +138,14 @@ export function findSimilarBotMessageInChat(
   while (scanned < maxMessagesToScan) {
     const remaining = maxMessagesToScan - scanned;
     const limit = Math.max(1, Math.min(pageSize, remaining));
-    const botMessages = queryMessages(db, { chatId, fromIsBot: true, limit, offset, order: 'desc' }).filter(
-      msg => typeof msg.text === 'string' && msg.text.trim().length > 0
+    const botMessages = queryMessages(db, {
+      chatId,
+      fromIsBot: true,
+      limit,
+      offset,
+      order: "desc",
+    }).filter(
+      (msg) => typeof msg.text === "string" && msg.text.trim().length > 0,
     );
     if (botMessages.length === 0) {
       break;
@@ -151,13 +162,25 @@ export function findSimilarBotMessageInChat(
         normalizedCandidate.length >= normalizedPrompt.length &&
         normalizedCandidate.includes(normalizedPrompt)
       ) {
-        return { blocked: true, similarity: 1, matchedMessageId: message.message_id };
+        return {
+          blocked: true,
+          similarity: 1,
+          matchedMessageId: message.message_id,
+        };
       }
 
       if (promptTokens.length >= minPromptTokensForContainment) {
-        const containment = containmentCoefficient(normalizedPrompt, normalizedCandidate, containmentNgramSize);
+        const containment = containmentCoefficient(
+          normalizedPrompt,
+          normalizedCandidate,
+          containmentNgramSize,
+        );
         if (containment >= containmentThreshold) {
-          return { blocked: true, similarity: containment, matchedMessageId: message.message_id };
+          return {
+            blocked: true,
+            similarity: containment,
+            matchedMessageId: message.message_id,
+          };
         }
       }
 
@@ -166,7 +189,11 @@ export function findSimilarBotMessageInChat(
         bestSimilarity = similarity;
         bestMessageId = message.message_id;
         if (bestSimilarity >= threshold) {
-          return { blocked: true, similarity: bestSimilarity, matchedMessageId: bestMessageId };
+          return {
+            blocked: true,
+            similarity: bestSimilarity,
+            matchedMessageId: bestMessageId,
+          };
         }
       }
     }

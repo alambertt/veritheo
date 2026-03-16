@@ -1,15 +1,15 @@
-import { z } from 'zod';
-import { generateText, tool, stepCountIs } from 'ai';
-import { google } from '@ai-sdk/google';
+import { z } from "zod";
+import { generateText, tool, stepCountIs } from "ai";
+import { google } from "@ai-sdk/google";
 
 const result = await generateText({
-  model: google('gemini-2.5-flash'),
-  prompt: 'What is the weather in San Francisco?',
+  model: google("gemini-2.5-flash"),
+  prompt: "What is the weather in San Francisco?",
   tools: {
     weather: tool({
-      description: 'Get the weather in a location',
+      description: "Get the weather in a location",
       inputSchema: z.object({
-        location: z.string().describe('The location to get the weather for'),
+        location: z.string().describe("The location to get the weather for"),
       }),
       execute: async ({ location }) => ({
         location,
