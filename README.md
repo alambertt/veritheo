@@ -10,7 +10,6 @@ Un bot de Telegram que responde preguntas teológicas con imparcialidad y verdad
 - `/help` - Lo que necesitas saber para utilizar este bot
 - `/persona` - Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura
 - `/verify` - Responde a un mensaje para verificar su contenido y citar posibles errores
-- `/fallacy_detector` - Analiza un mensaje en busca de falacias argumentativas
 - `/roast` - Refuta un argumento usando los mejores contraargumentos del espectro teológico contrario
 
 ## Instalación

@@ -387,149 +387,85 @@ bot.command('verify', async ctx => {
       return;
     }
 
-    const botSimilarity = findSimilarBotMessageInChat(database, chatId, messageToVerify, {
-      threshold: SIMILARITY_THRESHOLD,
-    });
+    const botSimilarity = findSimilarBotMessageInChat(
+      database,
+      chatId,
+      messageToVerify,
+      {
+        threshold: SIMILARITY_THRESHOLD,
+      },
+    );
     if (botSimilarity.blocked) {
       await ctx.reply(MESSAGES.verifyBotMessageBlocked);
       return;
     }
     const chatTitle =
-      'title' in ctx.chat && typeof ctx.chat.title === 'string'
+      "title" in ctx.chat && typeof ctx.chat.title === "string"
         ? ctx.chat.title
-        : 'username' in ctx.chat
+        : "username" in ctx.chat
           ? ctx.chat.username
           : undefined;
 
     const stopTyping = startTypingIndicator(ctx);
+    const draftStreamer = createContextDraftStreamer(ctx);
     try {
-      const { text } = await verifyMessageContent(messageToVerify, {
-        authorName,
-        chatTitle,
-      });
+      const { text } = await verifyMessageContent(
+        messageToVerify,
+        {
+          authorName,
+          chatTitle,
+        },
+        draftStreamer
+          ? {
+              onPartialText: (partialText) => draftStreamer.update(partialText),
+            }
+          : undefined,
+      );
+
+      await draftStreamer?.finish(text);
 
       if (text) {
-        await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
+        await replyWithLLMMessage(ctx, database, text, {
+          replyToMessageId: replyToId,
+        });
       } else {
         await ctx.reply(MESSAGES.verifyEmptyResult);
       }
     } finally {
+      draftStreamer?.abort();
       stopTyping();
     }
   } catch (error) {
-    console.error('Failed to process /verify command:', error);
-    await notifyError(`Failed to process /verify command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
+    console.error("Failed to process /verify command:", error);
+    await notifyError(
+      `Failed to process /verify command (chatId=${ctx.chat?.id ?? "unknown"})`,
+      error,
+    );
     try {
       await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
     } catch (replyError) {
-      console.error('Failed to send /verify error message:', replyError);
-      await notifyError('Failed to send /verify error message', replyError);
+      console.error("Failed to send /verify error message:", replyError);
+      await notifyError("Failed to send /verify error message", replyError);
     }
   }
 });
 
-bot.command('fallacy_detector', async ctx => {
-  try {
-    logCommandInvocation(ctx, '/fallacy_detector', [
-      `ReplyToMessageId: ${ctx.message?.reply_to_message?.message_id ?? 'none'}`,
-    ]);
-    if (!ctx.message?.reply_to_message || !ctx.chat?.id) {
-      await ctx.reply(MESSAGES.fallacyReplyRequired);
-      return;
-    }
-
-    const replyToId = ctx.message.reply_to_message.message_id;
-    const chatId = ctx.chat.id;
-    let messageToAnalyze: string | undefined;
-    let authorName: string | undefined;
-    let authorId: number | undefined;
-
-    try {
-      const storedMessage = getMessageByChatAndMessageId(database, chatId, replyToId);
-      if (storedMessage?.text?.trim()) {
-        messageToAnalyze = storedMessage.text.trim();
-        authorId = storedMessage.from_id ?? undefined;
-        authorName =
-          formatDisplayName([storedMessage.from_first_name, storedMessage.from_last_name]) ??
-          storedMessage.from_username;
-      }
-    } catch (dbError) {
-      console.error('Failed to retrieve message from database for /fallacy_detector:', dbError);
-      await notifyError('Failed to retrieve message from database for /fallacy_detector command', dbError);
-    }
-
-    if (!messageToAnalyze) {
-      const replied = ctx.message.reply_to_message;
-      const repliedText =
-        'text' in replied && typeof replied.text === 'string'
-          ? replied.text
-          : 'caption' in replied && typeof replied.caption === 'string'
-            ? replied.caption
-            : undefined;
-      if (repliedText?.trim()) {
-        messageToAnalyze = repliedText.trim();
-      }
-      if ('from' in replied && replied.from) {
-        authorId = replied.from.id;
-        if (!authorName) {
-          authorName =
-            formatDisplayName([replied.from.first_name, replied.from.last_name]) ?? replied.from.username ?? undefined;
-        }
-      }
-    }
-
-    if (!messageToAnalyze) {
-      await ctx.reply(MESSAGES.fallacyOriginalMissing);
-      return;
-    }
-
-    if (authorId && UNTOUCHABLE_USER_IDS.includes(authorId)) {
-      await ctx.reply(MESSAGES.fallacyUntouchable);
-      return;
-    }
-
-    const stopTyping = startTypingIndicator(ctx);
-    try {
-      const { text } = await detectMessageFallacies(messageToAnalyze, {
-        authorName,
-        chatTitle:
-          'title' in ctx.chat && typeof ctx.chat.title === 'string'
-            ? ctx.chat.title
-            : 'username' in ctx.chat
-              ? ctx.chat.username
-              : undefined,
-      });
-
-      if (text) {
-        await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
-      } else {
-        await ctx.reply(MESSAGES.fallacyEmptyResult);
-      }
-    } finally {
-      stopTyping();
-    }
-  } catch (error) {
-    console.error('Failed to process /fallacy_detector command:', error);
-    await notifyError(`Failed to process /fallacy_detector command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
-    try {
-      await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
-    } catch (replyError) {
-      console.error('Failed to send /fallacy_detector error message:', replyError);
-      await notifyError('Failed to send /fallacy_detector error message', replyError);
-    }
-  }
+bot.command("fallacy_detector", (ctx) => {
+  logCommandInvocation(ctx, "/fallacy_detector");
+  return ctx.reply(MESSAGES.fallacyUnavailable);
 });
-
-bot.command('roast', async ctx => {
+bot.command("roast", async (ctx) => {
   try {
     const replyToMessage = ctx.message?.reply_to_message;
     const chatId = ctx.chat?.id;
-    const directArgument = ctx.message?.text ? ctx.message.text.split(' ').slice(1).join(' ').trim() : '';
+    const directArgument = ctx.message?.text
+      ? ctx.message.text.split(" ").slice(1).join(" ").trim()
+      : "";
     const replyToId = replyToMessage?.message_id;
 
-    logCommandInvocation(ctx, '/roast', [
-      `ReplyToMessageId: ${replyToId ?? 'none'}`,
-      `Argument: ${directArgument || '[none provided]'}`,
+    logCommandInvocation(ctx, "/roast", [
+      `ReplyToMessageId: ${replyToId ?? "none"}`,
+      `Argument: ${directArgument || "[none provided]"}`,
     ]);
 
     let messageToRoast: string | undefined;
