@@ -56,82 +56,96 @@ describe('sqlite message storage', () => {
     expect(botMessages[0]?.message_id).toBe(1);
   });
 
-  it('fetches messages by chat and message id', () => {
+  it("fetches messages by chat and message id", () => {
     storeTelegramMessage(
       db,
       buildTelegramMessageRecord({
         message_id: 5,
-        chat: { id: 7, type: 'private' },
+        chat: { id: 7, type: "private" },
         date: 1_700_000_100,
-        text: 'Saved message',
+        text: "Saved message",
       }),
     );
 
     const record = getMessageByChatAndMessageId(db, 7, 5);
     expect(record).toBeDefined();
-    expect(record?.text).toBe('Saved message');
+    expect(record?.text).toBe("Saved message");
   });
 
-  it('orders messages when querying', () => {
+  it("orders messages when querying", () => {
     storeTelegramMessage(
       db,
       buildTelegramMessageRecord({
         message_id: 1,
-        chat: { id: 9, type: 'group' },
+        chat: { id: 9, type: "group" },
         date: 1_700_000_200,
-        text: 'Older',
+        text: "Older",
       }),
     );
     storeTelegramMessage(
       db,
       buildTelegramMessageRecord({
         message_id: 2,
-        chat: { id: 9, type: 'group' },
+        chat: { id: 9, type: "group" },
         date: 1_700_000_300,
-        text: 'Newer',
+        text: "Newer",
       }),
     );
 
-    const messages = queryMessages(db, { chatId: 9, order: 'asc' });
-    expect(messages.map(message => message.text)).toEqual(['Older', 'Newer']);
+    const messages = queryMessages(db, { chatId: 9, order: "asc" });
+    expect(messages.map((message) => message.text)).toEqual(["Older", "Newer"]);
   });
 
-  it('maps Telegram messages including captions', () => {
+  it("maps Telegram messages including captions", () => {
     const mapped = mapToTelegramRawMessage({
       message_id: 99,
       date: 1_700_000_400,
-      chat: { id: 555, type: 'private' },
-      caption: 'Photo caption',
+      chat: { id: 555, type: "private" },
+      caption: "Photo caption",
     } as any);
 
     const record = buildTelegramMessageRecord(mapped);
-    expect(record.text).toBe('Photo caption');
+    expect(record.text).toBe("Photo caption");
     expect(record.chat_id).toBe(555);
   });
 
-  it('filters with text and date ranges', () => {
+  it("maps Telegram reply_to_message_id when present", () => {
+    const mapped = mapToTelegramRawMessage({
+      message_id: 100,
+      date: 1_700_000_410,
+      chat: { id: 555, type: "private" },
+      text: "Reply",
+      reply_to_message: {
+        message_id: 99,
+      },
+    } as any);
+
+    expect(mapped.reply_to_message_id).toBe(99);
+  });
+
+  it("filters with text and date ranges", () => {
     storeTelegramMessage(
       db,
       buildTelegramMessageRecord({
         message_id: 10,
-        chat: { id: 11, type: 'group' },
+        chat: { id: 11, type: "group" },
         date: 1_700_000_500,
-        text: 'Find me',
+        text: "Find me",
       }),
     );
     storeTelegramMessage(
       db,
       buildTelegramMessageRecord({
         message_id: 11,
-        chat: { id: 11, type: 'group' },
+        chat: { id: 11, type: "group" },
         date: 1_700_000_600,
-        text: 'Ignore me',
+        text: "Ignore me",
       }),
     );
 
     const filtered = queryMessages(db, {
       chatId: 11,
-      textLike: 'Find',
+      textLike: "Find",
       sinceDate: 1_700_000_400,
       untilDate: 1_700_000_550,
     });
