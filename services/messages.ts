@@ -27,7 +27,7 @@ Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orie
     "Por favor, proporciona una pregunta después del comando /ask.",
   askGroupMissingQuestion:
     "Por favor, proporciona una pregunta después del comando /ask_group.",
-  queueReceived: "✅ Recibido. Estoy procesando tu solicitud.",
+  queueReceived: "✔️ Recibido. Estoy procesando tu solicitud.",
   verifyReplyRequired:
     "Por favor, responde al mensaje que deseas verificar y luego usa /verify.",
   verifyUntouchable:
@@ -64,5 +64,5 @@ Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orie
 
 export const buildQueueReceivedMessage = (pendingJobs: number) =>
   pendingJobs > 1
-    ? `✅ Recibido. Hay ${pendingJobs - 1} solicitud(es) antes de la tuya en la cola.`
+    ? `✔️ Recibido. Hay ${pendingJobs - 1} solicitud(es) antes de la tuya en la cola.`
     : MESSAGES.queueReceived;
