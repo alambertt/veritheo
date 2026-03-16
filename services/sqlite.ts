@@ -88,6 +88,7 @@ export function setupSchema(db: Database) {
 
 export type TelegramRawMessage = {
   message_id: number;
+  reply_to_message_id?: number;
   date: number;
   chat: {
     id: number;
@@ -176,14 +177,21 @@ function mapUser(user: User | undefined): TelegramRawMessage['from'] {
 
 export function mapToTelegramRawMessage(message: Message): TelegramRawMessage {
   const text =
-    'text' in message && typeof message.text === 'string'
+    "text" in message && typeof message.text === "string"
       ? message.text
-      : 'caption' in message && typeof message.caption === 'string'
+      : "caption" in message && typeof message.caption === "string"
         ? message.caption
         : undefined;
+  const replyToMessageId =
+    "reply_to_message" in message &&
+    message.reply_to_message &&
+    typeof message.reply_to_message.message_id === "number"
+      ? message.reply_to_message.message_id
+      : undefined;
 
   return {
     message_id: message.message_id,
+    reply_to_message_id: replyToMessageId,
     date: message.date,
     chat: mapChat(message.chat),
     from: mapUser((message as { from?: User }).from),
@@ -510,13 +518,60 @@ export function getMessageByChatAndMessageId(
   return row ? mapStoredMessageRow(row) : undefined;
 }
 
+function getReplyToMessageId(
+  message: StoredTelegramMessage,
+): number | undefined {
+  if (!message.raw || typeof message.raw !== "object") {
+    return undefined;
+  }
+
+  const raw = message.raw as { reply_to_message_id?: unknown };
+  return typeof raw.reply_to_message_id === "number"
+    ? raw.reply_to_message_id
+    : undefined;
+}
+
+export function getReplyChainMessages(
+  db: Database,
+  chatId: number,
+  messageId: number,
+  options: { limit?: number } = {},
+): StoredTelegramMessage[] {
+  const limit = options.limit ?? 20;
+  const messages: StoredTelegramMessage[] = [];
+  const visited = new Set<number>();
+  let currentMessageId: number | undefined = messageId;
+
+  while (
+    typeof currentMessageId === "number" &&
+    messages.length < limit &&
+    !visited.has(currentMessageId)
+  ) {
+    visited.add(currentMessageId);
+    const message = getMessageByChatAndMessageId(db, chatId, currentMessageId);
+    if (!message) {
+      break;
+    }
+
+    messages.push(message);
+    currentMessageId = getReplyToMessageId(message);
+  }
+
+  return messages.reverse();
+}
+
 function mapLlmJobRow(row: any): LlmJob {
   let contextMessages: string[] = [];
-  if (typeof row.context_messages_json === 'string' && row.context_messages_json.trim() !== '') {
+  if (
+    typeof row.context_messages_json === "string" &&
+    row.context_messages_json.trim() !== ""
+  ) {
     try {
       const parsed = JSON.parse(row.context_messages_json);
       if (Array.isArray(parsed)) {
-        contextMessages = parsed.filter((message): message is string => typeof message === 'string');
+        contextMessages = parsed.filter(
+          (message): message is string => typeof message === "string",
+        );
       }
     } catch {
       contextMessages = [];
