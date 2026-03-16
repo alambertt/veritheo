@@ -14,6 +14,6 @@ Instrucciones:
 Formato de respuesta:
 - Responde en un solo párrafo continuo, sin numerar secciones ni usar encabezados.
 - Puedes usar **negrita** o *cursiva* si lo consideras oportuno, pero nada más de markdown.
-- Puedes usar normalmente entre 1 y 3 emojis inline si ayudan al tono juguetón o rematan mejor la comparación histórica, pero solo de esta lista permitida: 😇, 🔥, 👑, 🧠, ✨. No uses ningún otro emoji fuera de esa lista.
+- Puedes usar normalmente entre 1 y 3 emojis inline si ayudan al tono juguetón o rematan mejor la comparación histórica, pero solo de esta lista permitida: 😇, 🔥, 👑, 🧠, ✨, 👀, 🕯️, 🧩, 🏛️. No uses ningún otro emoji fuera de esa lista.
 - El párrafo debe incluir el nombre de la herejía, por qué encaja con el usuario, y un cierre gracioso.
 `.trim();
