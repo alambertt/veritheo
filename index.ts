@@ -260,8 +260,9 @@ bot.command("ask", async (ctx) => {
       question: question.trim(),
     });
     const pendingJobs = countPendingLlmJobsForChat(database, chatId);
-    await ctx.reply(buildQueueReceivedMessage(pendingJobs), {
-      reply_to_message_id: requestMessageId,
+    await replyWithLLMMessage(ctx, database, buildQueueReceivedMessage(pendingJobs), {
+      preferMarkdown: false,
+      replyToMessageId: requestMessageId,
     });
   } catch (error) {
     console.error("Failed to process /ask command:", error);
@@ -327,8 +328,9 @@ bot.command("ask_group", async (ctx) => {
       contextMessages,
     });
     const pendingJobs = countPendingLlmJobsForChat(database, chatId);
-    await ctx.reply(buildQueueReceivedMessage(pendingJobs), {
-      reply_to_message_id: requestMessageId,
+    await replyWithLLMMessage(ctx, database, buildQueueReceivedMessage(pendingJobs), {
+      preferMarkdown: false,
+      replyToMessageId: requestMessageId,
     });
   } catch (error) {
     console.error("Failed to process /ask_group command:", error);
@@ -819,7 +821,9 @@ bot.command("my_heresy", async (ctx) => {
 
 bot.command("ping", (ctx) => {
   logCommandInvocation(ctx, "/ping");
-  ctx.reply(MESSAGES.ping);
+  return replyWithLLMMessage(ctx, database, MESSAGES.ping, {
+    preferMarkdown: false,
+  });
 });
 
 bot.on("message", async (ctx) => {
@@ -881,8 +885,9 @@ bot.on("message", async (ctx) => {
       contextMessages,
     });
     const pendingJobs = countPendingLlmJobsForChat(database, chatId);
-    await ctx.reply(buildQueueReceivedMessage(pendingJobs), {
-      reply_to_message_id: requestMessageId,
+    await replyWithLLMMessage(ctx, database, buildQueueReceivedMessage(pendingJobs), {
+      preferMarkdown: false,
+      replyToMessageId: requestMessageId,
     });
   } catch (error) {
     console.error("Failed to persist message:", error);
