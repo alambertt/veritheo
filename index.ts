@@ -1,17 +1,28 @@
-import { config } from 'dotenv';
-import { Bot } from 'grammy';
-import { createChannelLogger, formatDisplayName } from './services/channel-logs';
-import { detectMessageFallacies } from './services/fallacy-detector';
-import { detectUserHeresy } from './services/heresy';
-import { startLlmQueueWorker } from './services/llm-queue';
-import { BANNED_COMMAND_MESSAGE, buildQueueReceivedMessage, GENERIC_ERROR_MESSAGE, MESSAGES } from './services/messages';
-import { replyWithLLMMessage } from './services/reply';
-import { roastMessageContent } from './services/roast';
-import { verifyMessageContent } from './services/verify';
+import { config } from "dotenv";
+import { Bot } from "grammy";
+import {
+  createChannelLogger,
+  formatDisplayName,
+} from "./services/channel-logs";
+import { detectUserHeresy } from "./services/heresy";
+import { startLlmQueueWorker } from "./services/llm-queue";
+import {
+  BANNED_COMMAND_MESSAGE,
+  buildQueueReceivedMessage,
+  GENERIC_ERROR_MESSAGE,
+  MESSAGES,
+} from "./services/messages";
+import {
+  createContextDraftStreamer,
+  replyWithLLMMessage,
+} from "./services/reply";
+import { roastMessageContent } from "./services/roast";
+import { verifyMessageContent } from "./services/verify";
 import {
   buildTelegramMessageRecord,
   countPendingLlmJobsForChat,
   enqueueLlmJob,
+  getReplyChainMessages,
   getMessageByChatAndMessageId,
   getMessagesByChat,
   getHeresyCacheEntry,
@@ -83,13 +94,116 @@ const HERESY_LOOKBACK_SECONDS = 365 * 24 * 60 * 60;
 const HERESY_MIN_LENGTH = 100;
 const HERESY_MAX_MESSAGES = 20;
 
-const { sendChannelLog, notifyError, logCommandInvocation } = createChannelLogger(token, CHANNEL_LOGS_ID);
+const { sendChannelLog, notifyError, logCommandInvocation } =
+  createChannelLogger(token, CHANNEL_LOGS_ID);
 
-const isCommandMessage = (text?: string, entities?: { type: string; offset: number; length: number }[]) => {
+const isCommandMessage = (
+  text?: string,
+  entities?: { type: string; offset: number; length: number }[],
+) => {
   if (!text || !entities) {
     return false;
   }
-  return entities.some(entity => entity.type === 'bot_command' && entity.offset === 0);
+  return entities.some(
+    (entity) => entity.type === "bot_command" && entity.offset === 0,
+  );
+};
+
+const getTelegramMessageText = (message?: {
+  text?: unknown;
+  caption?: unknown;
+}) => {
+  if (!message || typeof message !== "object") {
+    return undefined;
+  }
+
+  if (typeof message.text === "string") {
+    return message.text;
+  }
+
+  return typeof message.caption === "string" ? message.caption : undefined;
+};
+
+const isReplyToThisBot = (
+  replyToMessage:
+    | { from?: { is_bot?: boolean; username?: string } }
+    | undefined,
+  botUsername?: string,
+) =>
+  Boolean(
+    botUsername &&
+    replyToMessage?.from?.is_bot === true &&
+    replyToMessage.from.username === botUsername,
+  );
+
+const buildThreadContextEntry = (message: {
+  text?: string;
+  from_is_bot?: boolean;
+  from_first_name?: string;
+  from_last_name?: string;
+  from_username?: string;
+}) => {
+  const text = message.text?.trim();
+  if (!text) {
+    return undefined;
+  }
+
+  const authorLabel = message.from_is_bot
+    ? "Veritheo"
+    : (formatDisplayName([message.from_first_name, message.from_last_name]) ??
+      message.from_username ??
+      "Usuario");
+
+  return `${authorLabel}: ${text}`;
+};
+
+const buildReplyContinuationContext = (
+  chainMessages: {
+    message_id: number;
+    text?: string;
+    from_is_bot?: boolean;
+    from_first_name?: string;
+    from_last_name?: string;
+    from_username?: string;
+  }[],
+  currentMessageId: number,
+  fallbackReplyMessage?: {
+    text?: string;
+    caption?: string;
+    from?: {
+      is_bot?: boolean;
+      first_name?: string;
+      last_name?: string;
+      username?: string;
+    };
+  },
+) => {
+  const history = chainMessages
+    .filter((message) => message.message_id !== currentMessageId)
+    .map(buildThreadContextEntry)
+    .filter((message): message is string => Boolean(message));
+
+  if (history.length > 0 || !fallbackReplyMessage) {
+    return history;
+  }
+
+  const fallbackText = getTelegramMessageText(fallbackReplyMessage)?.trim();
+  if (!fallbackText) {
+    return history;
+  }
+
+  return [
+    `${
+      fallbackReplyMessage.from?.is_bot
+        ? "Veritheo"
+        : (formatDisplayName([
+            fallbackReplyMessage.from?.first_name,
+            fallbackReplyMessage.from?.last_name,
+          ]) ??
+          fallbackReplyMessage.from?.username ??
+          "Usuario")
+    }: ${fallbackText}`,
+  ];
 };
 
 bot.use(async (ctx, next) => {
@@ -626,73 +740,129 @@ bot.command('my_heresy', async ctx => {
         await ctx.reply(MESSAGES.modelEmptyResult);
       }
     } finally {
+      draftStreamer?.abort();
       stopTyping();
     }
   } catch (error) {
-    console.error('Failed to process /my_heresy command:', error);
-    await notifyError(`Failed to process /my_heresy command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
+    console.error("Failed to process /my_heresy command:", error);
+    await notifyError(
+      `Failed to process /my_heresy command (chatId=${ctx.chat?.id ?? "unknown"})`,
+      error,
+    );
     try {
       await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
     } catch (replyError) {
-      console.error('Failed to send /my_heresy error message:', replyError);
-      await notifyError('Failed to send /my_heresy error message', replyError);
+      console.error("Failed to send /my_heresy error message:", replyError);
+      await notifyError("Failed to send /my_heresy error message", replyError);
     }
   }
 });
 
-bot.command('ping', ctx => {
-  logCommandInvocation(ctx, '/ping');
+bot.command("ping", (ctx) => {
+  logCommandInvocation(ctx, "/ping");
   ctx.reply(MESSAGES.ping);
 });
 
-bot.on('message', async ctx => {
+bot.on("message", async (ctx) => {
   if (!ctx.message) {
     return;
   }
 
   try {
     const rawMessage = mapToTelegramRawMessage(ctx.message);
-    if (!rawMessage.text || rawMessage.text.trim() === '') {
+    if (!rawMessage.text || rawMessage.text.trim() === "") {
       return;
     }
 
     const record = buildTelegramMessageRecord(rawMessage);
     storeTelegramMessage(database, record);
+
+    if (ctx.message.from?.is_bot) {
+      return;
+    }
+
+    if (isCommandMessage(ctx.message.text, ctx.message.entities)) {
+      return;
+    }
+
+    if (ctx.message.from?.id && BANNED_USER_IDS.includes(ctx.message.from.id)) {
+      return;
+    }
+
+    const chatId = ctx.chat?.id;
+    const requestMessageId = ctx.message.message_id;
+    const replyToMessage = ctx.message.reply_to_message;
+    const question = rawMessage.text.trim();
+
+    if (
+      !chatId ||
+      !replyToMessage ||
+      !isReplyToThisBot(replyToMessage, ctx.me.username)
+    ) {
+      return;
+    }
+
+    const storedChain = getReplyChainMessages(
+      database,
+      chatId,
+      requestMessageId,
+      { limit: 12 },
+    );
+    const contextMessages = buildReplyContinuationContext(
+      storedChain,
+      requestMessageId,
+      replyToMessage,
+    );
+
+    enqueueLlmJob(database, {
+      kind: "ask",
+      chatId,
+      requestMessageId,
+      question,
+      contextMessages,
+    });
+    const pendingJobs = countPendingLlmJobsForChat(database, chatId);
+    await ctx.reply(buildQueueReceivedMessage(pendingJobs), {
+      reply_to_message_id: requestMessageId,
+    });
   } catch (error) {
-    console.error('Failed to persist message:', error);
-    await notifyError(`Failed to persist message (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
+    console.error("Failed to persist message:", error);
+    await notifyError(
+      `Failed to persist message (chatId=${ctx.chat?.id ?? "unknown"})`,
+      error,
+    );
   }
 });
 
-bot.catch(async err => {
-  console.error('Error:', err);
-  await notifyError('Unhandled bot error', err);
+bot.catch(async (err) => {
+  console.error("Error:", err);
+  await notifyError("Unhandled bot error", err);
 });
 
-console.log('Starting bot...');
-sendChannelLog('🚀 Bot starting...');
+console.log("Starting bot...");
+sendChannelLog("🚀 Bot starting...");
 startLlmQueueWorker(bot, database, {
   onError: notifyError,
   onResponse: async ({ job, text, sourcesMessage }) => {
-    if (job.kind !== 'ask') {
+    if (job.kind !== "ask") {
       return;
     }
 
     const lines = [
-      '🧠 /ask response',
+      "🧠 /ask response",
       `JobId: ${job.id}`,
       `ChatId: ${job.chat_id}`,
       `RequestMessageId: ${job.request_message_id}`,
       `Question: ${job.question}`,
-      'Response:',
-      text?.trim() || '[empty]',
+      "Response:",
+      text?.trim() || "[empty]",
     ];
 
     if (sourcesMessage?.trim()) {
-      lines.push('Sources:', sourcesMessage.trim());
+      lines.push("Sources:", sourcesMessage.trim());
     }
 
-    await sendChannelLog(lines.join('\n'));
+    await sendChannelLog(lines.join("\n"));
   },
 });
 bot.start();
