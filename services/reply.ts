@@ -1,12 +1,16 @@
 import { GrammyError, type Context } from "grammy";
-import type { ParseMode } from "grammy/types";
+import type { MessageEntity, ParseMode } from "grammy/types";
 import type { Database } from "bun:sqlite";
+import { TELEGRAM_CUSTOM_EMOJI_MAP } from "../constants";
 import { summarizeText } from "./summarize";
 import {
   buildTelegramMessageRecord,
   mapToTelegramRawMessage,
   storeTelegramMessage,
 } from "./sqlite";
+import {
+  buildTelegramFormattedText,
+} from "./telegram-formatting";
 import {
   createTelegramDraftStreamer,
   supportsTelegramDraftStreaming,
@@ -28,30 +32,60 @@ export async function replyWithLLMMessage(
   options?: { preferMarkdown?: boolean; replyToMessageId?: number },
 ) {
   const limitedText = await limitTelegramText(text);
-  const attempts: (ParseMode | undefined)[] =
-    options?.preferMarkdown === false ? [undefined] : ["Markdown", undefined];
   let lastError: unknown;
   const replyToMessageId =
     typeof options?.replyToMessageId === "number"
       ? options.replyToMessageId
       : ctx.message?.message_id;
+  const replyOptions = replyToMessageId
+    ? {
+        reply_to_message_id: replyToMessageId,
+        allow_sending_without_reply: true,
+      }
+    : {};
+  const formatted = buildTelegramFormattedText(
+    limitedText,
+    TELEGRAM_CUSTOM_EMOJI_MAP,
+  );
+  const attempts: Array<{
+    text: string;
+    sendOptions?:
+      | ({
+          entities?: MessageEntity[];
+        } & typeof replyOptions)
+      | ({
+          parse_mode?: ParseMode;
+        } & typeof replyOptions);
+  }> = [];
 
-  for (const parseMode of attempts) {
+  if (formatted.entities.length > 0) {
+    attempts.push({
+      text: formatted.text,
+      sendOptions: {
+        ...replyOptions,
+        entities: formatted.entities as MessageEntity[],
+      },
+    });
+  }
+
+  if (options?.preferMarkdown !== false) {
+    attempts.push({
+      text: limitedText,
+      sendOptions: {
+        ...replyOptions,
+        parse_mode: "Markdown",
+      },
+    });
+  }
+
+  attempts.push({
+    text: limitedText,
+    sendOptions: replyOptions,
+  });
+
+  for (const attempt of attempts) {
     try {
-      const replyMessage = await ctx.reply(
-        limitedText,
-        parseMode || replyToMessageId
-          ? {
-              ...(parseMode ? { parse_mode: parseMode } : {}),
-              ...(replyToMessageId
-                ? {
-                    reply_to_message_id: replyToMessageId,
-                    allow_sending_without_reply: true,
-                  }
-                : {}),
-            }
-          : undefined,
-      );
+      const replyMessage = await ctx.reply(attempt.text, attempt.sendOptions);
       try {
         const botRawMessage = {
           ...mapToTelegramRawMessage(replyMessage),
@@ -67,7 +101,7 @@ export async function replyWithLLMMessage(
       return replyMessage;
     } catch (error) {
       lastError = error;
-      if (parseMode) {
+      if (attempt !== attempts.at(-1)) {
         const description =
           error instanceof GrammyError
             ? error.description
@@ -77,7 +111,7 @@ export async function replyWithLLMMessage(
                 ? error
                 : JSON.stringify(error);
         console.warn(
-          `Markdown send failed (${description}). Retrying without formatting.`,
+          `Telegram formatted send failed (${description}). Retrying with a simpler format.`,
         );
         continue;
       }
