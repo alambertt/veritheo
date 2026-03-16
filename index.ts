@@ -348,33 +348,47 @@ bot.command('verify', async ctx => {
     }
 
     try {
-      const storedMessage = getMessageByChatAndMessageId(database, chatId, replyToId);
+      const storedMessage = getMessageByChatAndMessageId(
+        database,
+        chatId,
+        replyToId,
+      );
       if (storedMessage?.text?.trim()) {
         messageToVerify = storedMessage.text.trim();
         authorName =
-          formatDisplayName([storedMessage.from_first_name, storedMessage.from_last_name]) ??
-          storedMessage.from_username;
+          formatDisplayName([
+            storedMessage.from_first_name,
+            storedMessage.from_last_name,
+          ]) ?? storedMessage.from_username;
       }
     } catch (dbError) {
-      console.error('Failed to retrieve message from database:', dbError);
-      await notifyError('Failed to retrieve message from database for /verify command', dbError);
+      console.error("Failed to retrieve message from database:", dbError);
+      await notifyError(
+        "Failed to retrieve message from database for /verify command",
+        dbError,
+      );
     }
 
     if (!messageToVerify) {
       const replied = ctx.message.reply_to_message;
       // Fallback al payload original entregado por la API de Telegram cuando la BD no tiene el mensaje.
       const repliedText =
-        'text' in replied && typeof replied.text === 'string'
+        "text" in replied && typeof replied.text === "string"
           ? replied.text
-          : 'caption' in replied && typeof replied.caption === 'string'
+          : "caption" in replied && typeof replied.caption === "string"
             ? replied.caption
             : undefined;
       if (repliedText?.trim()) {
         messageToVerify = repliedText.trim();
       }
-      if (!authorName && 'from' in replied && replied.from) {
+      if (!authorName && "from" in replied && replied.from) {
         authorName =
-          formatDisplayName([replied.from.first_name, replied.from.last_name]) ?? replied.from.username ?? undefined;
+          formatDisplayName([
+            replied.from.first_name,
+            replied.from.last_name,
+          ]) ??
+          replied.from.username ??
+          undefined;
       }
     }
 
@@ -476,37 +490,52 @@ bot.command("roast", async (ctx) => {
     if (replyToMessage && chatId) {
       const repliedMessageId = replyToMessage.message_id;
       try {
-        const storedMessage = getMessageByChatAndMessageId(database, chatId, repliedMessageId);
+        const storedMessage = getMessageByChatAndMessageId(
+          database,
+          chatId,
+          repliedMessageId,
+        );
         if (storedMessage?.text?.trim()) {
           messageToRoast = storedMessage.text.trim();
           authorId = storedMessage.from_id ?? undefined;
           authorName =
-            formatDisplayName([storedMessage.from_first_name, storedMessage.from_last_name]) ??
-            storedMessage.from_username;
+            formatDisplayName([
+              storedMessage.from_first_name,
+              storedMessage.from_last_name,
+            ]) ?? storedMessage.from_username;
           replyTargetId = repliedMessageId;
         }
       } catch (dbError) {
-        console.error('Failed to retrieve message from database for /roast:', dbError);
-        await notifyError('Failed to retrieve message from database for /roast command', dbError);
+        console.error(
+          "Failed to retrieve message from database for /roast:",
+          dbError,
+        );
+        await notifyError(
+          "Failed to retrieve message from database for /roast command",
+          dbError,
+        );
       }
 
       if (!messageToRoast) {
         const replied = replyToMessage;
         const repliedText =
-          'text' in replied && typeof replied.text === 'string'
+          "text" in replied && typeof replied.text === "string"
             ? replied.text
-            : 'caption' in replied && typeof replied.caption === 'string'
+            : "caption" in replied && typeof replied.caption === "string"
               ? replied.caption
               : undefined;
         if (repliedText?.trim()) {
           messageToRoast = repliedText.trim();
           replyTargetId = repliedMessageId;
         }
-        if ('from' in replied && replied.from) {
+        if ("from" in replied && replied.from) {
           authorId = replied.from.id;
           if (!authorName) {
             authorName =
-              formatDisplayName([replied.from.first_name, replied.from.last_name]) ??
+              formatDisplayName([
+                replied.from.first_name,
+                replied.from.last_name,
+              ]) ??
               replied.from.username ??
               undefined;
           }
@@ -529,9 +558,14 @@ bot.command("roast", async (ctx) => {
     }
 
     if (chatId) {
-      const botSimilarity = findSimilarBotMessageInChat(database, chatId, messageToRoast, {
-        threshold: SIMILARITY_THRESHOLD,
-      });
+      const botSimilarity = findSimilarBotMessageInChat(
+        database,
+        chatId,
+        messageToRoast,
+        {
+          threshold: SIMILARITY_THRESHOLD,
+        },
+      );
       if (botSimilarity.blocked) {
         await ctx.reply(MESSAGES.roastBotMessageBlocked);
         return;
@@ -543,47 +577,69 @@ bot.command("roast", async (ctx) => {
     }
 
     const stopTyping = startTypingIndicator(ctx);
+    const draftStreamer = createContextDraftStreamer(ctx);
     try {
-      const { text } = await roastMessageContent(messageToRoast, {
-        authorName,
-        chatTitle:
-          'title' in ctx.chat && typeof ctx.chat.title === 'string'
-            ? ctx.chat.title
-            : 'username' in ctx.chat
-              ? ctx.chat.username
-              : undefined,
-      });
+      const { text } = await roastMessageContent(
+        messageToRoast,
+        {
+          authorName,
+          chatTitle:
+            "title" in ctx.chat && typeof ctx.chat.title === "string"
+              ? ctx.chat.title
+              : "username" in ctx.chat
+                ? ctx.chat.username
+                : undefined,
+        },
+        draftStreamer
+          ? {
+              onPartialText: (partialText) => draftStreamer.update(partialText),
+            }
+          : undefined,
+      );
+
+      await draftStreamer?.finish(text);
 
       if (text) {
-        await replyWithLLMMessage(ctx, database, text, replyTargetId ? { replyToMessageId: replyTargetId } : undefined);
+        await replyWithLLMMessage(
+          ctx,
+          database,
+          text,
+          replyTargetId ? { replyToMessageId: replyTargetId } : undefined,
+        );
       } else {
         await ctx.reply(MESSAGES.modelEmptyResult);
       }
     } finally {
+      draftStreamer?.abort();
       stopTyping();
     }
   } catch (error) {
-    console.error('Failed to process /roast command:', error);
-    await notifyError(`Failed to process /roast command (chatId=${ctx.chat?.id ?? 'unknown'})`, error);
+    console.error("Failed to process /roast command:", error);
+    await notifyError(
+      `Failed to process /roast command (chatId=${ctx.chat?.id ?? "unknown"})`,
+      error,
+    );
     try {
       await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
     } catch (replyError) {
-      console.error('Failed to send /roast error message:', replyError);
-      await notifyError('Failed to send /roast error message', replyError);
+      console.error("Failed to send /roast error message:", replyError);
+      await notifyError("Failed to send /roast error message", replyError);
     }
   }
 });
 
-bot.command('my_heresy', async ctx => {
+bot.command("my_heresy", async (ctx) => {
   try {
     const replyToMessage = ctx.message?.reply_to_message;
     const chatId = ctx.chat?.id;
     const chatType = ctx.chat?.type;
     const replyToId = replyToMessage?.message_id;
 
-    logCommandInvocation(ctx, '/my_heresy', [`ReplyToMessageId: ${replyToId ?? 'none'}`]);
+    logCommandInvocation(ctx, "/my_heresy", [
+      `ReplyToMessageId: ${replyToId ?? "none"}`,
+    ]);
 
-    if (!chatId || !chatType || chatType === 'private') {
+    if (!chatId || !chatType || chatType === "private") {
       await ctx.reply(MESSAGES.heresyGroupOnly);
       return;
     }
@@ -602,24 +658,40 @@ bot.command('my_heresy', async ctx => {
     let authorName: string | undefined;
 
     try {
-      const storedMessage = getMessageByChatAndMessageId(database, chatId, replyToId ?? 0);
+      const storedMessage = getMessageByChatAndMessageId(
+        database,
+        chatId,
+        replyToId ?? 0,
+      );
       if (storedMessage) {
         authorId = storedMessage.from_id ?? undefined;
         authorName =
-          formatDisplayName([storedMessage.from_first_name, storedMessage.from_last_name]) ??
+          formatDisplayName([
+            storedMessage.from_first_name,
+            storedMessage.from_last_name,
+          ]) ??
           storedMessage.from_username ??
           undefined;
       }
     } catch (dbError) {
-      console.error('Failed to retrieve message from database for /my_heresy:', dbError);
-      await notifyError('Failed to retrieve message from database for /my_heresy command', dbError);
+      console.error(
+        "Failed to retrieve message from database for /my_heresy:",
+        dbError,
+      );
+      await notifyError(
+        "Failed to retrieve message from database for /my_heresy command",
+        dbError,
+      );
     }
 
     if (!authorId && replyToMessage.from) {
       authorId = replyToMessage.from.id;
       authorName =
         authorName ??
-        formatDisplayName([replyToMessage.from.first_name, replyToMessage.from.last_name]) ??
+        formatDisplayName([
+          replyToMessage.from.first_name,
+          replyToMessage.from.last_name,
+        ]) ??
         replyToMessage.from.username ??
         undefined;
     }
@@ -637,19 +709,29 @@ bot.command('my_heresy', async ctx => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const cached = getHeresyCacheEntry(database, chatId, authorId);
     if (cached && nowSeconds - cached.created_at < HERESY_CACHE_TTL_SECONDS) {
-      await replyWithLLMMessage(ctx, database, cached.response, { replyToMessageId: replyToId });
+      await replyWithLLMMessage(ctx, database, cached.response, {
+        replyToMessageId: replyToId,
+      });
       return;
     }
 
     const sinceDate = nowSeconds - HERESY_LOOKBACK_SECONDS;
-    const recentMessages = getUserMessagesForHeresy(database, chatId, authorId, sinceDate, {
-      limit: HERESY_MAX_MESSAGES,
-      minLength: HERESY_MIN_LENGTH,
-    });
+    const recentMessages = getUserMessagesForHeresy(
+      database,
+      chatId,
+      authorId,
+      sinceDate,
+      {
+        limit: HERESY_MAX_MESSAGES,
+        minLength: HERESY_MIN_LENGTH,
+      },
+    );
 
     const messageTexts = recentMessages
-      .map(message => message.text?.trim())
-      .filter((text): text is string => Boolean(text && text.length > HERESY_MIN_LENGTH));
+      .map((message) => message.text?.trim())
+      .filter((text): text is string =>
+        Boolean(text && text.length > HERESY_MIN_LENGTH),
+      );
 
     if (messageTexts.length === 0) {
       await ctx.reply(MESSAGES.heresyInsufficientMaterial);
@@ -657,15 +739,27 @@ bot.command('my_heresy', async ctx => {
     }
 
     const stopTyping = startTypingIndicator(ctx);
+    const draftStreamer = createContextDraftStreamer(ctx);
     try {
-      const { text } = await detectUserHeresy({
-        authorName,
-        chatTitle: ctx.chat.title,
-        messages: messageTexts,
-      });
+      const { text } = await detectUserHeresy(
+        {
+          authorName,
+          chatTitle: ctx.chat.title,
+          messages: messageTexts,
+        },
+        draftStreamer
+          ? {
+              onPartialText: (partialText) => draftStreamer.update(partialText),
+            }
+          : undefined,
+      );
+
+      await draftStreamer?.finish(text);
 
       if (text) {
-        await replyWithLLMMessage(ctx, database, text, { replyToMessageId: replyToId });
+        await replyWithLLMMessage(ctx, database, text, {
+          replyToMessageId: replyToId,
+        });
         storeHeresyCacheEntry(database, {
           chat_id: chatId,
           user_id: authorId,

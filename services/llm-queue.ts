@@ -1,52 +1,89 @@
-import type { Database } from 'bun:sqlite';
-import { Bot } from 'grammy';
-import type { ParseMode } from 'grammy/types';
-import { askHandler } from './ask';
-import { buildSourcesMessage } from './sources';
-import { buildTelegramMessageRecord, claimNextLlmJob, mapToTelegramRawMessage, markLlmJobDone, markLlmJobFailed, requeueStuckLlmJobs, storeTelegramMessage, type LlmJob } from './sqlite';
-import { verifyMessageContent } from './verify';
+import type { Database } from "bun:sqlite";
+import { Bot } from "grammy";
+import type { ParseMode } from "grammy/types";
+import { askHandler } from "./ask";
+import { buildSourcesMessage } from "./sources";
+import {
+  buildTelegramMessageRecord,
+  claimNextLlmJob,
+  mapToTelegramRawMessage,
+  markLlmJobDone,
+  markLlmJobFailed,
+  requeueStuckLlmJobs,
+  storeTelegramMessage,
+  type LlmJob,
+} from "./sqlite";
+import {
+  createTelegramDraftStreamer,
+  supportsTelegramDraftStreaming,
+} from "./telegram-drafts";
+import { verifyMessageContent } from "./verify";
 
 const DEFAULT_MAX_CONCURRENT_JOBS = 3;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const GENERIC_ERROR_MESSAGE =
-  'Lo siento, ha ocurrido un error mientras procesaba tu solicitud. Por favor, inténtalo de nuevo más tarde.';
+  "Lo siento, ha ocurrido un error mientras procesaba tu solicitud. Por favor, inténtalo de nuevo más tarde.";
 
 type QueueWorkerOptions = {
   maxConcurrentJobs?: number;
   maxAttempts?: number;
   pollIntervalMs?: number;
   onError?: (context: string, error: unknown) => Promise<void> | void;
-  onResponse?: (payload: { job: LlmJob; text?: string; sourcesMessage?: string }) => Promise<void> | void;
+  onResponse?: (payload: {
+    job: LlmJob;
+    text?: string;
+    sourcesMessage?: string;
+  }) => Promise<void> | void;
 };
 
 async function sendAndPersistMessage(
   bot: Bot,
   db: Database,
-  params: { chatId: number; text: string; replyToMessageId?: number; preferMarkdown?: boolean }
+  params: {
+    chatId: number;
+    text: string;
+    replyToMessageId?: number;
+    preferMarkdown?: boolean;
+  },
 ) {
   const attempts: (ParseMode | undefined)[] =
-    params.preferMarkdown === false ? [undefined] : ['Markdown', undefined];
+    params.preferMarkdown === false ? [undefined] : ["Markdown", undefined];
 
   for (const parseMode of attempts) {
     try {
-      const sentMessage = await bot.api.sendMessage(params.chatId, params.text, {
-        ...(parseMode ? { parse_mode: parseMode } : {}),
+      const sentMessage = await bot.api.sendMessage(
+        params.chatId,
+        params.text,
+        {
+          ...(parseMode ? { parse_mode: parseMode } : {}),
+          ...(params.replyToMessageId
+            ? {
+                reply_to_message_id: params.replyToMessageId,
+              }
+            : {}),
+        },
+      );
+      const rawMessage = {
+        ...mapToTelegramRawMessage(sentMessage as any),
         ...(params.replyToMessageId
-          ? {
-              reply_to_message_id: params.replyToMessageId,
-            }
+          ? { reply_to_message_id: params.replyToMessageId }
           : {}),
-      });
-      const rawMessage = mapToTelegramRawMessage(sentMessage as any);
+      };
       const record = buildTelegramMessageRecord(rawMessage);
       storeTelegramMessage(db, record);
       return;
     } catch (error) {
       if (parseMode) {
         const description =
-          error instanceof Error ? error.message : typeof error === 'string' ? error : JSON.stringify(error);
-        console.warn(`Markdown queue send failed (${description}). Retrying without formatting.`);
+          error instanceof Error
+            ? error.message
+            : typeof error === "string"
+              ? error
+              : JSON.stringify(error);
+        console.warn(
+          `Markdown queue send failed (${description}). Retrying without formatting.`,
+        );
         continue;
       }
       throw error;
@@ -54,8 +91,13 @@ async function sendAndPersistMessage(
   }
 }
 
-async function processJob(bot: Bot, db: Database, job: LlmJob, options: QueueWorkerOptions = {}) {
-  if (job.kind === 'verify') {
+async function processJob(
+  bot: Bot,
+  db: Database,
+  job: LlmJob,
+  options: QueueWorkerOptions = {},
+) {
+  if (job.kind === "verify") {
     const authorName = job.context_messages[0]?.trim() || undefined;
     const chatTitle = job.context_messages[1]?.trim() || undefined;
     const { text } = await verifyMessageContent(job.question, {
@@ -72,8 +114,36 @@ async function processJob(bot: Bot, db: Database, job: LlmJob, options: QueueWor
     }
     return;
   }
+  const shouldStreamDraft = supportsTelegramDraftStreaming(job.chat_id);
 
-  const { text, sources } = await askHandler(job.question, job.kind === 'ask_group' ? job.context_messages : undefined);
+  const draftStreamer = shouldStreamDraft
+    ? createTelegramDraftStreamer(bot.api, {
+        chatId: job.chat_id,
+      })
+    : undefined;
+
+  let text: string | undefined;
+  let sources: unknown;
+
+  try {
+    const response = await askHandler(
+      job.question,
+      job.context_messages.length > 0 ? job.context_messages : undefined,
+      draftStreamer
+        ? {
+            onPartialText: (partialText) => draftStreamer.update(partialText),
+          }
+        : undefined,
+    );
+
+    text = response.text;
+    sources = response.sources;
+
+    await draftStreamer?.finish(text);
+  } catch (error) {
+    draftStreamer?.abort();
+    throw error;
+  }
 
   if (text) {
     await sendAndPersistMessage(bot, db, {
@@ -92,13 +162,18 @@ async function processJob(bot: Bot, db: Database, job: LlmJob, options: QueueWor
     });
   }
 
-  if (job.kind === 'ask' && options.onResponse) {
+  if (job.kind === "ask" && options.onResponse) {
     await options.onResponse({ job, text, sourcesMessage });
   }
 }
 
-export function startLlmQueueWorker(bot: Bot, db: Database, options: QueueWorkerOptions = {}) {
-  const maxConcurrentJobs = options.maxConcurrentJobs ?? DEFAULT_MAX_CONCURRENT_JOBS;
+export function startLlmQueueWorker(
+  bot: Bot,
+  db: Database,
+  options: QueueWorkerOptions = {},
+) {
+  const maxConcurrentJobs =
+    options.maxConcurrentJobs ?? DEFAULT_MAX_CONCURRENT_JOBS;
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const activeChatIds = new Set<number>();

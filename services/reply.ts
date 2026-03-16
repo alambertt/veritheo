@@ -1,8 +1,16 @@
-import { GrammyError, type Context } from 'grammy';
-import type { ParseMode } from 'grammy/types';
-import type { Database } from 'bun:sqlite';
-import { summarizeText } from './summarize';
-import { buildTelegramMessageRecord, mapToTelegramRawMessage, storeTelegramMessage } from './sqlite';
+import { GrammyError, type Context } from "grammy";
+import type { ParseMode } from "grammy/types";
+import type { Database } from "bun:sqlite";
+import { summarizeText } from "./summarize";
+import {
+  buildTelegramMessageRecord,
+  mapToTelegramRawMessage,
+  storeTelegramMessage,
+} from "./sqlite";
+import {
+  createTelegramDraftStreamer,
+  supportsTelegramDraftStreaming,
+} from "./telegram-drafts";
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 
@@ -17,13 +25,16 @@ export async function replyWithLLMMessage(
   ctx: Context,
   db: Database,
   text: string,
-  options?: { preferMarkdown?: boolean; replyToMessageId?: number }
+  options?: { preferMarkdown?: boolean; replyToMessageId?: number },
 ) {
   const limitedText = await limitTelegramText(text);
-  const attempts: (ParseMode | undefined)[] = options?.preferMarkdown === false ? [undefined] : ['Markdown', undefined];
+  const attempts: (ParseMode | undefined)[] =
+    options?.preferMarkdown === false ? [undefined] : ["Markdown", undefined];
   let lastError: unknown;
   const replyToMessageId =
-    typeof options?.replyToMessageId === 'number' ? options.replyToMessageId : ctx.message?.message_id;
+    typeof options?.replyToMessageId === "number"
+      ? options.replyToMessageId
+      : ctx.message?.message_id;
 
   for (const parseMode of attempts) {
     try {
@@ -39,14 +50,19 @@ export async function replyWithLLMMessage(
                   }
                 : {}),
             }
-          : undefined
+          : undefined,
       );
       try {
-        const botRawMessage = mapToTelegramRawMessage(replyMessage);
+        const botRawMessage = {
+          ...mapToTelegramRawMessage(replyMessage),
+          ...(replyToMessageId
+            ? { reply_to_message_id: replyToMessageId }
+            : {}),
+        };
         const botRecord = buildTelegramMessageRecord(botRawMessage);
         storeTelegramMessage(db, botRecord);
       } catch (persistError) {
-        console.error('Failed to persist bot reply message:', persistError);
+        console.error("Failed to persist bot reply message:", persistError);
       }
       return replyMessage;
     } catch (error) {
@@ -57,15 +73,32 @@ export async function replyWithLLMMessage(
             ? error.description
             : error instanceof Error
               ? error.message
-              : typeof error === 'string'
+              : typeof error === "string"
                 ? error
                 : JSON.stringify(error);
-        console.warn(`Markdown send failed (${description}). Retrying without formatting.`);
+        console.warn(
+          `Markdown send failed (${description}). Retrying without formatting.`,
+        );
         continue;
       }
       throw error;
     }
   }
 
-  throw lastError ?? new Error('Failed to send reply.');
+  throw lastError ?? new Error("Failed to send reply.");
+}
+
+export function createContextDraftStreamer(ctx: Context) {
+  const chatId = ctx.chat?.id;
+  if (
+    !chatId ||
+    ctx.chat?.type !== "private" ||
+    !supportsTelegramDraftStreaming(chatId)
+  ) {
+    return undefined;
+  }
+
+  return createTelegramDraftStreamer(ctx.api, {
+    chatId,
+  });
 }
