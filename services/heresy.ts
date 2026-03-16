@@ -1,9 +1,12 @@
-import { generateText } from 'ai';
 // import { zhipu } from 'zhipu-ai-provider';
-import { google } from '@ai-sdk/google';
-import { GOOGLE_MODEL_LATEST } from '../constants';
-import { heresyPrompt } from '../prompts/heresy';
-import { logTokenUsage } from './token-usage';
+import { google } from "@ai-sdk/google";
+import { GOOGLE_MODEL_LATEST } from "../constants";
+import { heresyPrompt } from "../prompts/heresy";
+import {
+  generateTextResponse,
+  type PartialTextOptions,
+} from "./generate-text-response";
+import { logTokenUsage } from "./token-usage";
 
 export interface HeresyOptions {
   authorName?: string;
@@ -11,7 +14,10 @@ export interface HeresyOptions {
   messages: string[];
 }
 
-export async function detectUserHeresy(options: HeresyOptions) {
+export async function detectUserHeresy(
+  options: HeresyOptions,
+  streamOptions?: PartialTextOptions,
+) {
   const contextLines: string[] = [];
   if (options.authorName) {
     contextLines.push(`Autor o remitente: ${options.authorName}`);
@@ -20,27 +26,32 @@ export async function detectUserHeresy(options: HeresyOptions) {
     contextLines.push(`Conversación: ${options.chatTitle}`);
   }
 
-  const messagesBlock = options.messages.map(message => `- ${message}`).join('\n');
+  const messagesBlock = options.messages
+    .map((message) => `- ${message}`)
+    .join("\n");
 
   const userContent = [
-    'Analiza los mensajes y determina la herejía histórica cuyo espíritu más se alinea con el usuario.',
-    'Sigue estrictamente las instrucciones del sistema.',
-    contextLines.length ? contextLines.join('\n') : null,
-    '---',
-    'Mensajes del usuario:',
+    "Analiza los mensajes y determina la herejía histórica cuyo espíritu más se alinea con el usuario.",
+    "Sigue estrictamente las instrucciones del sistema.",
+    contextLines.length ? contextLines.join("\n") : null,
+    "---",
+    "Mensajes del usuario:",
     messagesBlock,
-    '---',
+    "---",
   ]
     .filter(Boolean)
-    .join('\n');
+    .join("\n");
 
-  const { text, usage } = await generateText({
-    // model: zhipu(ZHIPU_MODEL),
-    model: google(GOOGLE_MODEL_LATEST),
-    system: heresyPrompt,
-    messages: [{ role: 'user', content: userContent }],
-  });
-  logTokenUsage('/my_heresy', usage);
+  const { text, usage } = await generateTextResponse(
+    {
+      // model: zhipu(ZHIPU_MODEL),
+      model: google(GOOGLE_MODEL_LATEST),
+      system: heresyPrompt,
+      messages: [{ role: "user", content: userContent }],
+    },
+    streamOptions,
+  );
+  logTokenUsage("/my_heresy", usage);
 
   return { text };
 }
