@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { Bot } from "grammy";
 import type { ParseMode } from "grammy/types";
 import { askHandler } from "./ask";
+import { createLlmDraftStreamerForChat } from "./llm-streaming-policy";
 import { buildSourcesMessage } from "./sources";
 import {
   buildTelegramMessageRecord,
@@ -13,10 +14,6 @@ import {
   storeTelegramMessage,
   type LlmJob,
 } from "./sqlite";
-import {
-  createTelegramDraftStreamer,
-  supportsTelegramDraftStreaming,
-} from "./telegram-drafts";
 import { verifyMessageContent } from "./verify";
 
 const DEFAULT_MAX_CONCURRENT_JOBS = 3;
@@ -114,13 +111,11 @@ async function processJob(
     }
     return;
   }
-  const shouldStreamDraft = supportsTelegramDraftStreaming(job.chat_id);
-
-  const draftStreamer = shouldStreamDraft
-    ? createTelegramDraftStreamer(bot.api, {
-        chatId: job.chat_id,
-      })
-    : undefined;
+  const draftStreamer = createLlmDraftStreamerForChat({
+    api: bot.api,
+    chatId: job.chat_id,
+    chatType: "private",
+  });
 
   let text: string | undefined;
   let sources: unknown;

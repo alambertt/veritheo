@@ -12,9 +12,8 @@ import {
   buildTelegramFormattedText,
 } from "./telegram-formatting";
 import {
-  createTelegramDraftStreamer,
-  supportsTelegramDraftStreaming,
-} from "./telegram-drafts";
+  createLlmDraftStreamerForContext,
+} from "./llm-streaming-policy";
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 
@@ -123,16 +122,5 @@ export async function replyWithLLMMessage(
 }
 
 export function createContextDraftStreamer(ctx: Context) {
-  const chatId = ctx.chat?.id;
-  if (
-    !chatId ||
-    ctx.chat?.type !== "private" ||
-    !supportsTelegramDraftStreaming(chatId)
-  ) {
-    return undefined;
-  }
-
-  return createTelegramDraftStreamer(ctx.api, {
-    chatId,
-  });
+  return createLlmDraftStreamerForContext(ctx);
 }
