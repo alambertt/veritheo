@@ -9,10 +9,25 @@ export function shouldUseLlmDraftStreaming(params: {
   chatId?: number;
   chatType?: TelegramChatType;
 }) {
+  if (typeof params.chatId !== "number") {
+    return false;
+  }
+
+  if (!supportsTelegramDraftStreaming(params.chatId)) {
+    return false;
+  }
+
+  if (params.chatType === undefined) {
+    // Queue jobs do not currently persist the Telegram chat type.
+    // We still allow drafts here because chat IDs are enough to distinguish
+    // real chats from invalid values, and Telegram uses negative IDs for groups.
+    return true;
+  }
+
   return (
-    params.chatType === "private" &&
-    typeof params.chatId === "number" &&
-    supportsTelegramDraftStreaming(params.chatId)
+    params.chatType === "private" ||
+    params.chatType === "group" ||
+    params.chatType === "supergroup"
   );
 }
 

@@ -114,7 +114,6 @@ async function processJob(
   const draftStreamer = createLlmDraftStreamerForChat({
     api: bot.api,
     chatId: job.chat_id,
-    chatType: "private",
   });
 
   let text: string | undefined;

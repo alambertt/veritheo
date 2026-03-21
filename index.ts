@@ -852,43 +852,9 @@ bot.on("message", async (ctx) => {
       return;
     }
 
-    const chatId = ctx.chat?.id;
-    const requestMessageId = ctx.message.message_id;
-    const replyToMessage = ctx.message.reply_to_message;
-    const question = rawMessage.text.trim();
-
-    if (
-      !chatId ||
-      !replyToMessage ||
-      !isReplyToThisBot(replyToMessage, ctx.me.username)
-    ) {
-      return;
-    }
-
-    const storedChain = getReplyChainMessages(
-      database,
-      chatId,
-      requestMessageId,
-      { limit: 12 },
-    );
-    const contextMessages = buildReplyContinuationContext(
-      storedChain,
-      requestMessageId,
-      replyToMessage,
-    );
-
-    enqueueLlmJob(database, {
-      kind: "ask",
-      chatId,
-      requestMessageId,
-      question,
-      contextMessages,
-    });
-    const pendingJobs = countPendingLlmJobsForChat(database, chatId);
-    await replyWithLLMMessage(ctx, database, buildQueueReceivedMessage(pendingJobs), {
-      preferMarkdown: false,
-      replyToMessageId: requestMessageId,
-    });
+    // Temporarily disabled: replying to a bot message should not auto-enqueue
+    // a follow-up /ask request. We still persist inbound messages here so the
+    // conversation history remains available if this feature is restored later.
   } catch (error) {
     console.error("Failed to persist message:", error);
     await notifyError(
