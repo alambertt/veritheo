@@ -157,9 +157,6 @@ async function processJob(
     });
   }
 
-  if (job.kind === "ask" && options.onResponse) {
-    await options.onResponse({ job, text, sourcesMessage });
-  }
 }
 
 export function startLlmQueueWorker(
