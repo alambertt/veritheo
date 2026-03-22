@@ -36,7 +36,7 @@ function createDraftId(): number {
 }
 
 export function supportsTelegramDraftStreaming(chatId: number): boolean {
-  return Number.isSafeInteger(chatId) && chatId !== 0;
+  return Number.isSafeInteger(chatId) && chatId > 0;
 }
 
 export function createTelegramDraftStreamer(

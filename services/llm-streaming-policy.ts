@@ -19,16 +19,12 @@ export function shouldUseLlmDraftStreaming(params: {
 
   if (params.chatType === undefined) {
     // Queue jobs do not currently persist the Telegram chat type.
-    // We still allow drafts here because chat IDs are enough to distinguish
-    // real chats from invalid values, and Telegram uses negative IDs for groups.
+    // Until they do, only allow positive chat IDs here, which correspond to
+    // direct/private chats and avoid invalid draft attempts in groups.
     return true;
   }
 
-  return (
-    params.chatType === "private" ||
-    params.chatType === "group" ||
-    params.chatType === "supergroup"
-  );
+  return params.chatType === "private";
 }
 
 export function createLlmDraftStreamerForContext(ctx: Context) {
