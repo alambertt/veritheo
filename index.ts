@@ -32,6 +32,7 @@ import {
   storeHeresyCacheEntry,
   storeTelegramMessage,
 } from "./services/sqlite";
+import { getPrivateChatAutoAskQuestion } from "./services/private-chat-auto-ask";
 import { findSimilarBotMessageInChat } from "./services/self-message-guard";
 import { startTypingIndicator } from "./services/typing-indicator";
 import { SIMILARITY_THRESHOLD } from "./constants";
@@ -840,21 +841,42 @@ bot.on("message", async (ctx) => {
     const record = buildTelegramMessageRecord(rawMessage);
     storeTelegramMessage(database, record);
 
-    if (ctx.message.from?.is_bot) {
+    const question = getPrivateChatAutoAskQuestion({
+      chatType: ctx.chat?.type,
+      text: rawMessage.text,
+      isBot: ctx.message.from?.is_bot,
+      isCommand: isCommandMessage(ctx.message.text, ctx.message.entities),
+      userId: ctx.message.from?.id,
+      bannedUserIds: BANNED_USER_IDS,
+    });
+
+    if (!question) {
       return;
     }
 
-    if (isCommandMessage(ctx.message.text, ctx.message.entities)) {
+    const chatId = ctx.chat?.id;
+    const requestMessageId = ctx.message.message_id;
+
+    if (!chatId || !requestMessageId) {
+      await ctx.reply(GENERIC_ERROR_MESSAGE);
       return;
     }
 
-    if (ctx.message.from?.id && BANNED_USER_IDS.includes(ctx.message.from.id)) {
-      return;
-    }
+    logCommandInvocation(ctx, "private_auto_ask", [
+      `Question: ${question}`,
+    ]);
 
-    // Temporarily disabled: replying to a bot message should not auto-enqueue
-    // a follow-up /ask request. We still persist inbound messages here so the
-    // conversation history remains available if this feature is restored later.
+    enqueueLlmJob(database, {
+      kind: "ask",
+      chatId,
+      requestMessageId,
+      question,
+    });
+    const pendingJobs = countPendingLlmJobsForChat(database, chatId);
+    await replyWithLLMMessage(ctx, database, buildQueueReceivedMessage(pendingJobs), {
+      preferMarkdown: false,
+      replyToMessageId: requestMessageId,
+    });
   } catch (error) {
     console.error("Failed to persist message:", error);
     await notifyError(

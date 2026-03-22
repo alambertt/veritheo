@@ -6,6 +6,7 @@ Un bot de Telegram que responde preguntas teológicas con imparcialidad y verdad
 
 - `/start` - Mensaje de bienvenida
 - `/ask` - Pregunta lo que quieras en el chat privado
+  - En chat privado también puedes escribir tu pregunta directamente sin usar el comando
 - `/ask_group` - Pregunta en el grupo tomando como contexto los mensajes anteriores
 - `/help` - Lo que necesitas saber para utilizar este bot
 - `/persona` - Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura

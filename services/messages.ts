@@ -19,6 +19,7 @@ Comandos disponibles:
 /roast - Refuta un argumento usando los mejores contraargumentos del espectro teológico contrario
 /my_heresy - Descubre tu herejía histórica según tus mensajes en el grupo
 
+En chat privado también puedes escribirme directamente sin usar /ask.
 Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orientación.
   `.trim(),
   persona:
