@@ -33,6 +33,7 @@ import {
   storeTelegramMessage,
 } from "./services/sqlite";
 import { getPrivateChatAutoAskQuestion } from "./services/private-chat-auto-ask";
+import { getGroupMentionAutoAskQuestion } from "./services/group-mention-auto-ask";
 import { findSimilarBotMessageInChat } from "./services/self-message-guard";
 import { startTypingIndicator } from "./services/typing-indicator";
 import { SIMILARITY_THRESHOLD } from "./constants";
@@ -279,6 +280,27 @@ bot.command("ask", async (ctx) => {
     }
   }
 });
+
+const buildRecentGroupContextMessages = (
+  chatId: number,
+  currentMessageId?: number,
+): string[] | undefined => {
+  const storedMessages = getMessagesByChat(database, chatId, {
+    limit: 10,
+    order: "desc",
+  });
+  const textMessages = storedMessages
+    .filter(
+      (msg) =>
+        msg.text &&
+        msg.text.trim() !== "" &&
+        msg.message_id !== currentMessageId,
+    )
+    .map((msg) => msg.text!.trim())
+    .reverse();
+
+  return textMessages.length > 0 ? textMessages : undefined;
+};
 
 bot.command("ask_group", async (ctx) => {
   try {
@@ -841,15 +863,27 @@ bot.on("message", async (ctx) => {
     const record = buildTelegramMessageRecord(rawMessage);
     storeTelegramMessage(database, record);
 
-    const question = getPrivateChatAutoAskQuestion({
+    const isCommand = isCommandMessage(ctx.message.text, ctx.message.entities);
+    const privateQuestion = getPrivateChatAutoAskQuestion({
       chatType: ctx.chat?.type,
       text: rawMessage.text,
       isBot: ctx.message.from?.is_bot,
-      isCommand: isCommandMessage(ctx.message.text, ctx.message.entities),
+      isCommand,
+      userId: ctx.message.from?.id,
+      bannedUserIds: BANNED_USER_IDS,
+    });
+    const groupMentionQuestion = getGroupMentionAutoAskQuestion({
+      chatType: ctx.chat?.type,
+      text: rawMessage.text,
+      entities: ctx.message.entities,
+      botUsername: ctx.me.username,
+      isBot: ctx.message.from?.is_bot,
+      isCommand,
       userId: ctx.message.from?.id,
       bannedUserIds: BANNED_USER_IDS,
     });
 
+    const question = privateQuestion ?? groupMentionQuestion;
     if (!question) {
       return;
     }
@@ -862,15 +896,22 @@ bot.on("message", async (ctx) => {
       return;
     }
 
-    logCommandInvocation(ctx, "private_auto_ask", [
+    const jobKind = privateQuestion ? "ask" : "ask_group";
+    const contextMessages =
+      jobKind === "ask_group"
+        ? buildRecentGroupContextMessages(chatId, requestMessageId)
+        : undefined;
+
+    logCommandInvocation(ctx, privateQuestion ? "private_auto_ask" : "group_mention_auto_ask", [
       `Question: ${question}`,
     ]);
 
     enqueueLlmJob(database, {
-      kind: "ask",
+      kind: jobKind,
       chatId,
       requestMessageId,
       question,
+      contextMessages,
     });
     const pendingJobs = countPendingLlmJobsForChat(database, chatId);
     await replyWithLLMMessage(ctx, database, buildQueueReceivedMessage(pendingJobs), {
