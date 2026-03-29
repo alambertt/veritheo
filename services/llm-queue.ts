@@ -1,23 +1,18 @@
 import type { Database } from "bun:sqlite";
 import { Bot } from "grammy";
-import type { MessageEntity, ParseMode } from "grammy/types";
-import { TELEGRAM_CUSTOM_EMOJI_MAP } from "../constants";
 import { askHandler } from "./ask";
 import { createLlmDraftStreamerForChat } from "./llm-streaming-policy";
 import { buildSourcesMessage } from "./sources";
 import {
-  buildTelegramMessageRecord,
   claimNextLlmJob,
   isChatPaused,
-  mapToTelegramRawMessage,
   markLlmJobDone,
   markLlmJobFailed,
   markLlmJobSkipped,
   requeueStuckLlmJobs,
-  storeTelegramMessage,
   type LlmJob,
 } from "./sqlite";
-import { buildTelegramFormattedText } from "./telegram-formatting";
+import { sendTelegramText } from "./telegram-send";
 import { verifyMessageContent } from "./verify";
 
 const DEFAULT_MAX_CONCURRENT_JOBS = 3;
@@ -47,93 +42,9 @@ async function sendAndPersistMessage(
     replyToMessageId?: number;
     preferMarkdown?: boolean;
   },
-) : Promise<boolean> {
-  if (isChatPaused(db, params.chatId)) {
-    return false;
-  }
-
-  const formatted = buildTelegramFormattedText(
-    params.text,
-    TELEGRAM_CUSTOM_EMOJI_MAP,
-  );
-  const attempts: Array<{
-    text: string;
-    sendOptions:
-      | {
-          entities?: MessageEntity[];
-          reply_to_message_id?: number;
-        }
-      | {
-          parse_mode?: ParseMode;
-          reply_to_message_id?: number;
-        };
-  }> = [];
-
-  if (formatted.entities.length > 0) {
-    attempts.push({
-      text: formatted.text,
-      sendOptions: {
-        ...(params.replyToMessageId
-          ? { reply_to_message_id: params.replyToMessageId }
-          : {}),
-        entities: formatted.entities as MessageEntity[],
-      },
-    });
-  }
-
-  if (params.preferMarkdown !== false) {
-    attempts.push({
-      text: params.text,
-      sendOptions: {
-        ...(params.replyToMessageId
-          ? { reply_to_message_id: params.replyToMessageId }
-          : {}),
-        parse_mode: "Markdown",
-      },
-    });
-  }
-
-  attempts.push({
-    text: params.text,
-    sendOptions: params.replyToMessageId
-      ? { reply_to_message_id: params.replyToMessageId }
-      : {},
-  });
-
-  for (const attempt of attempts) {
-    try {
-      const sentMessage = await bot.api.sendMessage(
-        params.chatId,
-        attempt.text,
-        attempt.sendOptions,
-      );
-      const rawMessage = {
-        ...mapToTelegramRawMessage(sentMessage as any),
-        ...(params.replyToMessageId
-          ? { reply_to_message_id: params.replyToMessageId }
-          : {}),
-      };
-      const record = buildTelegramMessageRecord(rawMessage);
-      storeTelegramMessage(db, record);
-      return true;
-    } catch (error) {
-      if (attempt !== attempts.at(-1)) {
-        const description =
-          error instanceof Error
-            ? error.message
-            : typeof error === "string"
-              ? error
-              : JSON.stringify(error);
-        console.warn(
-          `Formatted queue send failed (${description}). Retrying with a simpler format.`,
-        );
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  return false;
+): Promise<boolean> {
+  const sentMessage = await sendTelegramText(bot.api, db, params);
+  return Boolean(sentMessage);
 }
 
 async function processJob(

@@ -5,6 +5,12 @@ import {
   formatDisplayName,
 } from "./services/channel-logs";
 import { detectUserHeresy } from "./services/heresy";
+import {
+  buildBroadcastAcceptedMessage,
+  getBroadcastMessage,
+  isOwnerBroadcastCommandAllowed,
+} from "./services/broadcast";
+import { startBroadcastQueueWorker } from "./services/broadcast-queue";
 import { startLlmQueueWorker } from "./services/llm-queue";
 import {
   BANNED_COMMAND_MESSAGE,
@@ -30,7 +36,9 @@ import {
   buildTelegramMessageRecord,
   countPendingLlmJobsForChat,
   enqueueLlmJob,
+  enqueueBroadcastJob,
   getChatPauseState,
+  getBroadcastTargetChats,
   getReplyChainMessages,
   getMessageByChatAndMessageId,
   getMessagesByChat,
@@ -336,6 +344,48 @@ bot.command("veritheo_status", async (ctx) => {
 
   logCommandInvocation(ctx, "/veritheo_status");
   await ctx.reply(getPauseStatusText(ctx.chat.id));
+});
+
+bot.command("veritheo_broadcast", async (ctx) => {
+  const chatType = ctx.chat?.type;
+  const userId = ctx.from?.id;
+
+  if (chatType !== "private") {
+    await ctx.reply(MESSAGES.broadcastPrivateOnly);
+    return;
+  }
+
+  if (!isOwnerBroadcastCommandAllowed({ chatType, userId })) {
+    await ctx.reply(MESSAGES.broadcastOwnerOnly);
+    return;
+  }
+
+  const message = getBroadcastMessage(ctx.message?.text);
+  if (!message) {
+    await ctx.reply(MESSAGES.broadcastMissingMessage);
+    return;
+  }
+
+  const ownerChatId = ctx.chat?.id;
+  if (!ownerChatId || !userId) {
+    await ctx.reply(GENERIC_ERROR_MESSAGE);
+    return;
+  }
+
+  const targets = getBroadcastTargetChats(database);
+  const job = enqueueBroadcastJob(database, {
+    ownerChatId,
+    ownerUserId: userId,
+    message,
+    targets,
+  });
+
+  logCommandInvocation(ctx, "/veritheo_broadcast", [
+    `Targets: ${job.total_count}`,
+    `Message: ${message}`,
+  ]);
+
+  await ctx.reply(buildBroadcastAcceptedMessage(job.total_count));
 });
 
 bot.command("start", (ctx) => {
@@ -1044,6 +1094,9 @@ bot.catch(async (err) => {
 console.log("Starting bot...");
 sendChannelLog("🚀 Bot starting...");
 startLlmQueueWorker(bot, database, {
+  onError: notifyError,
+});
+startBroadcastQueueWorker(bot, database, {
   onError: notifyError,
 });
 bot.start();

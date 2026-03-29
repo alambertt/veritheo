@@ -13,6 +13,7 @@ export const ALLOWED_COMMANDS_WHILE_PAUSED = new Set([
   "help",
   "start",
   "ping",
+  "veritheo_broadcast",
 ]);
 
 export function isGroupChatType(chatType?: string): boolean {

@@ -74,7 +74,53 @@ const CREATE_CHAT_PAUSE_STATES_TABLE = `
   );
 `;
 
-let insertMessageStatement: Statement | undefined;
+const CREATE_BROADCAST_JOBS_TABLE = `
+  CREATE TABLE IF NOT EXISTS broadcast_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_chat_id INTEGER NOT NULL,
+    owner_user_id INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    status TEXT NOT NULL,
+    total_count INTEGER NOT NULL DEFAULT 0,
+    sent_count INTEGER NOT NULL DEFAULT 0,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    completed_at INTEGER,
+    last_error TEXT
+  );
+`;
+
+const CREATE_BROADCAST_JOBS_STATUS_INDEX = `
+  CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_status_created
+    ON broadcast_jobs (status, created_at, id);
+`;
+
+const CREATE_BROADCAST_DELIVERIES_TABLE = `
+  CREATE TABLE IF NOT EXISTS broadcast_deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL,
+    chat_id INTEGER NOT NULL,
+    chat_type TEXT NOT NULL,
+    chat_title TEXT,
+    chat_username TEXT,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    sent_message_id INTEGER,
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    FOREIGN KEY(job_id) REFERENCES broadcast_jobs(id)
+  );
+`;
+
+const CREATE_BROADCAST_DELIVERIES_JOB_STATUS_INDEX = `
+  CREATE INDEX IF NOT EXISTS idx_broadcast_deliveries_job_status_id
+    ON broadcast_deliveries (job_id, status, id);
+`;
+
+const insertMessageStatements = new WeakMap<Database, Statement>();
 
 export function initializeDatabase(readonly = false): Database {
   const db = new Database(DATABASE_NAME, {
@@ -97,6 +143,10 @@ export function setupSchema(db: Database) {
   db.run(CREATE_LLM_JOBS_STATUS_INDEX);
   db.run(CREATE_LLM_JOBS_CHAT_INDEX);
   db.run(CREATE_CHAT_PAUSE_STATES_TABLE);
+  db.run(CREATE_BROADCAST_JOBS_TABLE);
+  db.run(CREATE_BROADCAST_JOBS_STATUS_INDEX);
+  db.run(CREATE_BROADCAST_DELIVERIES_TABLE);
+  db.run(CREATE_BROADCAST_DELIVERIES_JOB_STATUS_INDEX);
 }
 
 export type TelegramRawMessage = {
@@ -178,6 +228,51 @@ export interface LlmJob {
   last_error?: string;
 }
 
+export type BroadcastJobStatus = "pending" | "processing" | "done" | "failed";
+export type BroadcastDeliveryStatus =
+  | "pending"
+  | "processing"
+  | "done"
+  | "failed";
+
+export interface BroadcastJob {
+  id: number;
+  owner_chat_id: number;
+  owner_user_id: number;
+  message: string;
+  status: BroadcastJobStatus;
+  total_count: number;
+  sent_count: number;
+  failed_count: number;
+  created_at: number;
+  started_at?: number;
+  completed_at?: number;
+  last_error?: string;
+}
+
+export interface BroadcastDelivery {
+  id: number;
+  job_id: number;
+  chat_id: number;
+  chat_type: string;
+  chat_title?: string;
+  chat_username?: string;
+  status: BroadcastDeliveryStatus;
+  attempts: number;
+  sent_message_id?: number;
+  error?: string;
+  created_at: number;
+  updated_at: number;
+  completed_at?: number;
+}
+
+export interface BroadcastTargetChat {
+  chat_id: number;
+  chat_type: string;
+  chat_title?: string;
+  chat_username?: string;
+}
+
 function mapChat(chat: Chat): TelegramRawMessage["chat"] {
   return {
     id: chat.id,
@@ -250,6 +345,8 @@ export function storeTelegramMessage(
   db: Database,
   message: TelegramMessageRecord,
 ) {
+  let insertMessageStatement = insertMessageStatements.get(db);
+
   if (!insertMessageStatement) {
     insertMessageStatement = db.query(`
       INSERT INTO messages (
@@ -282,6 +379,7 @@ export function storeTelegramMessage(
         $raw
       )
     `);
+    insertMessageStatements.set(db, insertMessageStatement);
   }
 
   insertMessageStatement.run({
@@ -645,6 +743,41 @@ function mapChatPauseStateRow(row: any): ChatPauseState {
   };
 }
 
+function mapBroadcastJobRow(row: any): BroadcastJob {
+  return {
+    id: row.id,
+    owner_chat_id: row.owner_chat_id,
+    owner_user_id: row.owner_user_id,
+    message: row.message,
+    status: row.status,
+    total_count: Number(row.total_count ?? 0),
+    sent_count: Number(row.sent_count ?? 0),
+    failed_count: Number(row.failed_count ?? 0),
+    created_at: row.created_at,
+    started_at: row.started_at ?? undefined,
+    completed_at: row.completed_at ?? undefined,
+    last_error: row.last_error ?? undefined,
+  };
+}
+
+function mapBroadcastDeliveryRow(row: any): BroadcastDelivery {
+  return {
+    id: row.id,
+    job_id: row.job_id,
+    chat_id: row.chat_id,
+    chat_type: row.chat_type,
+    chat_title: row.chat_title ?? undefined,
+    chat_username: row.chat_username ?? undefined,
+    status: row.status,
+    attempts: Number(row.attempts ?? 0),
+    sent_message_id: row.sent_message_id ?? undefined,
+    error: row.error ?? undefined,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    completed_at: row.completed_at ?? undefined,
+  };
+}
+
 export function setChatPauseState(
   db: Database,
   params: {
@@ -1004,4 +1137,435 @@ export function countPendingLlmJobsForChat(
     .get({ $chat_id: chatId });
 
   return Number(row?.count ?? 0);
+}
+
+export function getBroadcastTargetChats(db: Database): BroadcastTargetChat[] {
+  const rows = db
+    .query(
+      `
+        SELECT m.chat_id, m.chat_type, m.chat_title, m.chat_username
+        FROM messages m
+        INNER JOIN (
+          SELECT chat_id, MAX(id) AS latest_id
+          FROM messages
+          GROUP BY chat_id
+        ) latest
+          ON latest.latest_id = m.id
+        ORDER BY m.chat_id ASC
+      `,
+    )
+    .all() as any[];
+
+  return rows.map((row) => ({
+    chat_id: row.chat_id,
+    chat_type: row.chat_type,
+    chat_title: row.chat_title ?? undefined,
+    chat_username: row.chat_username ?? undefined,
+  }));
+}
+
+export function enqueueBroadcastJob(
+  db: Database,
+  params: {
+    ownerChatId: number;
+    ownerUserId: number;
+    message: string;
+    targets?: BroadcastTargetChat[];
+  },
+): BroadcastJob {
+  const now = Math.floor(Date.now() / 1000);
+  const targets = params.targets ?? getBroadcastTargetChats(db);
+  const transaction = db.transaction(() => {
+    const jobResult = db
+      .query(
+        `
+          INSERT INTO broadcast_jobs (
+            owner_chat_id,
+            owner_user_id,
+            message,
+            status,
+            total_count,
+            sent_count,
+            failed_count,
+            created_at,
+            started_at,
+            completed_at,
+            last_error
+          ) VALUES (
+            $owner_chat_id,
+            $owner_user_id,
+            $message,
+            'pending',
+            $total_count,
+            0,
+            0,
+            $created_at,
+            NULL,
+            NULL,
+            NULL
+          )
+        `,
+      )
+      .run({
+        $owner_chat_id: params.ownerChatId,
+        $owner_user_id: params.ownerUserId,
+        $message: params.message,
+        $total_count: targets.length,
+        $created_at: now,
+      });
+
+    const jobId = Number(jobResult.lastInsertRowid);
+    const insertDelivery = db.query(
+      `
+        INSERT INTO broadcast_deliveries (
+          job_id,
+          chat_id,
+          chat_type,
+          chat_title,
+          chat_username,
+          status,
+          attempts,
+          sent_message_id,
+          error,
+          created_at,
+          updated_at,
+          completed_at
+        ) VALUES (
+          $job_id,
+          $chat_id,
+          $chat_type,
+          $chat_title,
+          $chat_username,
+          'pending',
+          0,
+          NULL,
+          NULL,
+          $created_at,
+          $updated_at,
+          NULL
+        )
+      `,
+    );
+
+    for (const target of targets) {
+      insertDelivery.run({
+        $job_id: jobId,
+        $chat_id: target.chat_id,
+        $chat_type: target.chat_type,
+        $chat_title: target.chat_title ?? null,
+        $chat_username: target.chat_username ?? null,
+        $created_at: now,
+        $updated_at: now,
+      });
+    }
+
+    return jobId;
+  });
+
+  const jobId = transaction();
+  return getBroadcastJobById(db, jobId)!;
+}
+
+export function getBroadcastJobById(
+  db: Database,
+  jobId: number,
+): BroadcastJob | undefined {
+  const row = db
+    .query(
+      `
+        SELECT *
+        FROM broadcast_jobs
+        WHERE id = $id
+        LIMIT 1
+      `,
+    )
+    .get({ $id: jobId }) as any;
+
+  return row ? mapBroadcastJobRow(row) : undefined;
+}
+
+export function listBroadcastDeliveriesForJob(
+  db: Database,
+  jobId: number,
+): BroadcastDelivery[] {
+  const rows = db
+    .query(
+      `
+        SELECT *
+        FROM broadcast_deliveries
+        WHERE job_id = $job_id
+        ORDER BY id ASC
+      `,
+    )
+    .all({ $job_id: jobId }) as any[];
+
+  return rows.map(mapBroadcastDeliveryRow);
+}
+
+export function requeueStuckBroadcastJobs(db: Database): number {
+  const now = Math.floor(Date.now() / 1000);
+  const resetJobs = db
+    .query(
+      `
+        UPDATE broadcast_jobs
+        SET status = 'pending',
+            started_at = NULL,
+            completed_at = NULL
+        WHERE status = 'processing'
+      `,
+    )
+    .run();
+  const resetDeliveries = db
+    .query(
+      `
+        UPDATE broadcast_deliveries
+        SET status = 'pending',
+            updated_at = $updated_at,
+            completed_at = NULL
+        WHERE status = 'processing'
+      `,
+    )
+    .run({ $updated_at: now });
+
+  return resetJobs.changes + resetDeliveries.changes;
+}
+
+export function claimNextBroadcastJob(db: Database): BroadcastJob | undefined {
+  const now = Math.floor(Date.now() / 1000);
+  const candidate = db
+    .query(
+      `
+        SELECT *
+        FROM broadcast_jobs
+        WHERE status = 'pending'
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+      `,
+    )
+    .get() as any;
+
+  if (!candidate) {
+    return undefined;
+  }
+
+  const claimResult = db
+    .query(
+      `
+        UPDATE broadcast_jobs
+        SET status = 'processing',
+            started_at = COALESCE(started_at, $started_at),
+            last_error = NULL
+        WHERE id = $id
+          AND status = 'pending'
+      `,
+    )
+    .run({
+      $id: candidate.id,
+      $started_at: now,
+    });
+
+  if (claimResult.changes === 0) {
+    return undefined;
+  }
+
+  return getBroadcastJobById(db, candidate.id);
+}
+
+export function claimNextBroadcastDelivery(
+  db: Database,
+  jobId: number,
+): BroadcastDelivery | undefined {
+  const now = Math.floor(Date.now() / 1000);
+  const candidate = db
+    .query(
+      `
+        SELECT *
+        FROM broadcast_deliveries
+        WHERE job_id = $job_id
+          AND status = 'pending'
+        ORDER BY id ASC
+        LIMIT 1
+      `,
+    )
+    .get({ $job_id: jobId }) as any;
+
+  if (!candidate) {
+    return undefined;
+  }
+
+  const claimResult = db
+    .query(
+      `
+        UPDATE broadcast_deliveries
+        SET status = 'processing',
+            attempts = attempts + 1,
+            updated_at = $updated_at,
+            error = NULL
+        WHERE id = $id
+          AND status = 'pending'
+      `,
+    )
+    .run({
+      $id: candidate.id,
+      $updated_at: now,
+    });
+
+  if (claimResult.changes === 0) {
+    return undefined;
+  }
+
+  const row = db
+    .query(
+      `
+        SELECT *
+        FROM broadcast_deliveries
+        WHERE id = $id
+        LIMIT 1
+      `,
+    )
+    .get({ $id: candidate.id }) as any;
+
+  return row ? mapBroadcastDeliveryRow(row) : undefined;
+}
+
+export function markBroadcastDeliveryDone(
+  db: Database,
+  params: {
+    deliveryId: number;
+    sentMessageId?: number;
+  },
+): void {
+  const now = Math.floor(Date.now() / 1000);
+  db.query(
+    `
+      UPDATE broadcast_deliveries
+      SET status = 'done',
+          sent_message_id = $sent_message_id,
+          error = NULL,
+          updated_at = $updated_at,
+          completed_at = $completed_at
+      WHERE id = $id
+    `,
+  ).run({
+    $id: params.deliveryId,
+    $sent_message_id: params.sentMessageId ?? null,
+    $updated_at: now,
+    $completed_at: now,
+  });
+}
+
+export function markBroadcastDeliveryFailed(
+  db: Database,
+  params: {
+    deliveryId: number;
+    error: string;
+  },
+): void {
+  const now = Math.floor(Date.now() / 1000);
+  db.query(
+    `
+      UPDATE broadcast_deliveries
+      SET status = 'failed',
+          error = $error,
+          updated_at = $updated_at,
+          completed_at = $completed_at
+      WHERE id = $id
+    `,
+  ).run({
+    $id: params.deliveryId,
+    $error: params.error,
+    $updated_at: now,
+    $completed_at: now,
+  });
+}
+
+export function getBroadcastJobCounts(
+  db: Database,
+  jobId: number,
+): {
+  total_count: number;
+  sent_count: number;
+  failed_count: number;
+} {
+  const row = db
+    .query(
+      `
+        SELECT
+          COUNT(*) AS total_count,
+          COALESCE(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END), 0) AS sent_count,
+          COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count
+        FROM broadcast_deliveries
+        WHERE job_id = $job_id
+      `,
+    )
+    .get({ $job_id: jobId }) as any;
+
+  return {
+    total_count: Number(row?.total_count ?? 0),
+    sent_count: Number(row?.sent_count ?? 0),
+    failed_count: Number(row?.failed_count ?? 0),
+  };
+}
+
+function syncBroadcastJobCounts(
+  db: Database,
+  jobId: number,
+  status?: BroadcastJobStatus,
+  lastError?: string,
+): {
+  total_count: number;
+  sent_count: number;
+  failed_count: number;
+} {
+  const counts = getBroadcastJobCounts(db, jobId);
+  const now = Math.floor(Date.now() / 1000);
+
+  db.query(
+    `
+      UPDATE broadcast_jobs
+      SET total_count = $total_count,
+          sent_count = $sent_count,
+          failed_count = $failed_count,
+          status = COALESCE($status, status),
+          completed_at = CASE
+            WHEN $status IN ('done', 'failed') THEN $completed_at
+            ELSE completed_at
+          END,
+          last_error = COALESCE($last_error, last_error)
+      WHERE id = $id
+    `,
+  ).run({
+    $id: jobId,
+    $total_count: counts.total_count,
+    $sent_count: counts.sent_count,
+    $failed_count: counts.failed_count,
+    $status: status ?? null,
+    $completed_at: now,
+    $last_error: lastError ?? null,
+  });
+
+  return counts;
+}
+
+export function completeBroadcastJob(
+  db: Database,
+  jobId: number,
+): {
+  total_count: number;
+  sent_count: number;
+  failed_count: number;
+} {
+  return syncBroadcastJobCounts(db, jobId, "done");
+}
+
+export function markBroadcastJobFailed(
+  db: Database,
+  jobId: number,
+  error: string,
+): {
+  total_count: number;
+  sent_count: number;
+  failed_count: number;
+} {
+  return syncBroadcastJobCounts(db, jobId, "failed", error);
 }

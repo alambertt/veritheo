@@ -70,6 +70,11 @@ Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orie
   pauseAlreadyActive: "⏸️ Veritheo ya estaba en pausa en este grupo.",
   resumeAlreadyActive: "▶️ Veritheo ya estaba activo en este grupo.",
   resumeSuccess: "▶️ Veritheo ha sido reanudado en este grupo.",
+  broadcastPrivateOnly:
+    "Este comando solo funciona en el chat privado con Veritheo.",
+  broadcastOwnerOnly: "No tienes permisos para usar este comando.",
+  broadcastMissingMessage:
+    "Por favor, proporciona un mensaje después del comando /veritheo_broadcast.",
   ping: "🏓 Pong!",
 } as const;
 
