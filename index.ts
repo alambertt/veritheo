@@ -1,5 +1,5 @@
 import { config } from "dotenv";
-import { Bot } from "grammy";
+import { Bot, type Context } from "grammy";
 import {
   createChannelLogger,
   formatDisplayName,
@@ -17,18 +17,30 @@ import {
   replyWithLLMMessage,
 } from "./services/reply";
 import { roastMessageContent } from "./services/roast";
+import {
+  formatPauseStatusMessage,
+  getCommandArgs,
+  getCommandName,
+  isGroupChatType,
+  parsePauseCommandArgs,
+  shouldBlockActivityWhilePaused,
+} from "./services/chat-pause";
 import { verifyMessageContent } from "./services/verify";
 import {
   buildTelegramMessageRecord,
   countPendingLlmJobsForChat,
   enqueueLlmJob,
+  getChatPauseState,
   getReplyChainMessages,
   getMessageByChatAndMessageId,
   getMessagesByChat,
   getHeresyCacheEntry,
   getUserMessagesForHeresy,
   initializeDatabase,
+  isChatPaused,
   mapToTelegramRawMessage,
+  resumeChatPause,
+  setChatPauseState,
   storeHeresyCacheEntry,
   storeTelegramMessage,
 } from "./services/sqlite";
@@ -107,6 +119,36 @@ const HERESY_MAX_MESSAGES = 20;
 
 const { sendChannelLog, notifyError, logCommandInvocation } =
   createChannelLogger(token, CHANNEL_LOGS_ID);
+
+const isGroupPauseControlChat = (chatType?: string) =>
+  isGroupChatType(chatType);
+
+const ensureGroupAdmin = async (ctx: Context) => {
+  if (!isGroupPauseControlChat(ctx.chat?.type)) {
+    await ctx.reply(MESSAGES.pauseGroupOnly);
+    return false;
+  }
+
+  if (!ctx.chat?.id || !ctx.from?.id) {
+    await ctx.reply(GENERIC_ERROR_MESSAGE);
+    return false;
+  }
+
+  const administrators = await ctx.api.getChatAdministrators(ctx.chat.id);
+  const isAdmin = administrators.some(
+    (administrator) => administrator.user.id === ctx.from?.id,
+  );
+
+  if (!isAdmin) {
+    await ctx.reply(MESSAGES.pauseAdminOnly);
+    return false;
+  }
+
+  return true;
+};
+
+const getPauseStatusText = (chatId: number) =>
+  formatPauseStatusMessage(getChatPauseState(database, chatId));
 
 const isCommandMessage = (
   text?: string,
@@ -230,7 +272,70 @@ bot.use(async (ctx, next) => {
     }
   }
 
+  const commandName = getCommandName(message.text);
+  if (
+    shouldBlockActivityWhilePaused({
+      chatType: ctx.chat?.type,
+      isPaused: Boolean(ctx.chat?.id && isChatPaused(database, ctx.chat.id)),
+      commandName,
+    }) &&
+    ctx.chat?.id
+  ) {
+    if (commandName) {
+      await ctx.reply(getPauseStatusText(ctx.chat.id));
+    }
+    return;
+  }
+
   await next();
+});
+
+bot.command("veritheo_pause", async (ctx) => {
+  if (!(await ensureGroupAdmin(ctx))) {
+    return;
+  }
+
+  const chatId = ctx.chat.id;
+  const args = parsePauseCommandArgs(getCommandArgs(ctx.message?.text));
+  const pausedUntil =
+    typeof args.durationSeconds === "number"
+      ? Math.floor(Date.now() / 1000) + args.durationSeconds
+      : undefined;
+
+  logCommandInvocation(ctx, "/veritheo_pause", [
+    `Duration: ${args.durationSeconds ? `${args.durationSeconds}s` : "indefinite"}`,
+    `Reason: ${args.reason ?? "[none provided]"}`,
+  ]);
+
+  const previousState = getChatPauseState(database, chatId);
+  setChatPauseState(database, {
+    chatId,
+    pausedByUserId: ctx.from?.id,
+    pausedUntil,
+    reason: args.reason,
+  });
+
+  const prefix = previousState?.is_active ? `${MESSAGES.pauseAlreadyActive} ` : "";
+  await ctx.reply(`${prefix}${getPauseStatusText(chatId)}`.trim());
+});
+
+bot.command("veritheo_resume", async (ctx) => {
+  if (!(await ensureGroupAdmin(ctx))) {
+    return;
+  }
+
+  logCommandInvocation(ctx, "/veritheo_resume");
+  const resumed = resumeChatPause(database, ctx.chat.id);
+  await ctx.reply(resumed ? MESSAGES.resumeSuccess : MESSAGES.resumeAlreadyActive);
+});
+
+bot.command("veritheo_status", async (ctx) => {
+  if (!(await ensureGroupAdmin(ctx))) {
+    return;
+  }
+
+  logCommandInvocation(ctx, "/veritheo_status");
+  await ctx.reply(getPauseStatusText(ctx.chat.id));
 });
 
 bot.command("start", (ctx) => {
@@ -862,6 +967,10 @@ bot.on("message", async (ctx) => {
 
     const record = buildTelegramMessageRecord(rawMessage);
     storeTelegramMessage(database, record);
+
+    if (ctx.chat?.id && isGroupChatType(ctx.chat.type) && isChatPaused(database, ctx.chat.id)) {
+      return;
+    }
 
     const isCommand = isCommandMessage(ctx.message.text, ctx.message.entities);
     const privateQuestion = getPrivateChatAutoAskQuestion({

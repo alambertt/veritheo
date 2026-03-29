@@ -8,9 +8,11 @@ import { buildSourcesMessage } from "./sources";
 import {
   buildTelegramMessageRecord,
   claimNextLlmJob,
+  isChatPaused,
   mapToTelegramRawMessage,
   markLlmJobDone,
   markLlmJobFailed,
+  markLlmJobSkipped,
   requeueStuckLlmJobs,
   storeTelegramMessage,
   type LlmJob,
@@ -45,7 +47,11 @@ async function sendAndPersistMessage(
     replyToMessageId?: number;
     preferMarkdown?: boolean;
   },
-) {
+) : Promise<boolean> {
+  if (isChatPaused(db, params.chatId)) {
+    return false;
+  }
+
   const formatted = buildTelegramFormattedText(
     params.text,
     TELEGRAM_CUSTOM_EMOJI_MAP,
@@ -109,7 +115,7 @@ async function sendAndPersistMessage(
       };
       const record = buildTelegramMessageRecord(rawMessage);
       storeTelegramMessage(db, record);
-      return;
+      return true;
     } catch (error) {
       if (attempt !== attempts.at(-1)) {
         const description =
@@ -126,6 +132,8 @@ async function sendAndPersistMessage(
       throw error;
     }
   }
+
+  return false;
 }
 
 async function processJob(
@@ -133,7 +141,11 @@ async function processJob(
   db: Database,
   job: LlmJob,
   options: QueueWorkerOptions = {},
-) {
+): Promise<"done" | "skipped"> {
+  if (isChatPaused(db, job.chat_id)) {
+    return "skipped";
+  }
+
   if (job.kind === "verify") {
     const authorName = job.context_messages[0]?.trim() || undefined;
     const chatTitle = job.context_messages[1]?.trim() || undefined;
@@ -143,13 +155,16 @@ async function processJob(
     });
 
     if (text) {
-      await sendAndPersistMessage(bot, db, {
+      const sent = await sendAndPersistMessage(bot, db, {
         chatId: job.chat_id,
         text,
         replyToMessageId: job.request_message_id,
       });
+      if (!sent) {
+        return "skipped";
+      }
     }
-    return;
+    return "done";
   }
   const draftStreamer = createLlmDraftStreamerForChat({
     api: bot.api,
@@ -180,21 +195,29 @@ async function processJob(
   }
 
   if (text) {
-    await sendAndPersistMessage(bot, db, {
+    const sent = await sendAndPersistMessage(bot, db, {
       chatId: job.chat_id,
       text,
       replyToMessageId: job.request_message_id,
     });
+    if (!sent) {
+      return "skipped";
+    }
   }
 
   const sourcesMessage = buildSourcesMessage(sources);
   if (sourcesMessage) {
-    await sendAndPersistMessage(bot, db, {
+    const sent = await sendAndPersistMessage(bot, db, {
       chatId: job.chat_id,
       text: sourcesMessage,
       replyToMessageId: job.request_message_id,
     });
+    if (!sent) {
+      return "skipped";
+    }
   }
+
+  return "done";
 }
 
 export function startLlmQueueWorker(
@@ -235,8 +258,12 @@ export function startLlmQueueWorker(
 
         void (async () => {
           try {
-            await processJob(bot, db, job, options);
-            markLlmJobDone(db, job.id);
+            const outcome = await processJob(bot, db, job, options);
+            if (outcome === "skipped") {
+              markLlmJobSkipped(db, job.id, "Skipped because the chat is paused");
+            } else {
+              markLlmJobDone(db, job.id);
+            }
           } catch (error) {
             const details =
               error instanceof Error

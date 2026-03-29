@@ -13,6 +13,9 @@ Bienvenido a Veritheo - Tu Guía Teológica
 Comandos disponibles:
 /ask - Pregunta lo que quieras en el chat privado
 /ask_group - Pregunta en el grupo tomando como contexto los mensajes anteriores
+/veritheo_pause - Pausa a Veritheo en este grupo
+/veritheo_resume - Reanuda a Veritheo en este grupo
+/veritheo_status - Muestra si Veritheo está pausado en este grupo
 /help - Lo que necesitas saber para utilizar este bot
 /persona - Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura
 /verify - Responde a un mensaje para verificar su contenido y citar posibles errores
@@ -60,6 +63,13 @@ Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orie
     "😇 Este sabio infalible está más allá de las herejías terrenales. Mejor solo admirarlo desde lejos. ✨",
   heresyInsufficientMaterial:
     "No encontré suficientes mensajes largos del último año para ese usuario. Necesito más material de herejía.",
+  pauseGroupOnly:
+    "Este comando solo funciona en grupos donde Veritheo puede pausarse o reanudarse.",
+  pauseAdminOnly:
+    "Solo los administradores del grupo pueden usar este comando.",
+  pauseAlreadyActive: "⏸️ Veritheo ya estaba en pausa en este grupo.",
+  resumeAlreadyActive: "▶️ Veritheo ya estaba activo en este grupo.",
+  resumeSuccess: "▶️ Veritheo ha sido reanudado en este grupo.",
   ping: "🏓 Pong!",
 } as const;
 

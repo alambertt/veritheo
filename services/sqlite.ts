@@ -62,6 +62,18 @@ const CREATE_LLM_JOBS_CHAT_INDEX = `
     ON llm_jobs (chat_id, status, created_at, id);
 `;
 
+const CREATE_CHAT_PAUSE_STATES_TABLE = `
+  CREATE TABLE IF NOT EXISTS chat_pause_states (
+    chat_id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL,
+    paused_at INTEGER NOT NULL,
+    paused_until INTEGER,
+    reason TEXT,
+    paused_by_user_id INTEGER,
+    resumed_at INTEGER
+  );
+`;
+
 let insertMessageStatement: Statement | undefined;
 
 export function initializeDatabase(readonly = false): Database {
@@ -84,6 +96,7 @@ export function setupSchema(db: Database) {
   db.run(CREATE_LLM_JOBS_TABLE);
   db.run(CREATE_LLM_JOBS_STATUS_INDEX);
   db.run(CREATE_LLM_JOBS_CHAT_INDEX);
+  db.run(CREATE_CHAT_PAUSE_STATES_TABLE);
 }
 
 export type TelegramRawMessage = {
@@ -133,6 +146,19 @@ export interface HeresyCacheEntry {
   user_id: number;
   created_at: number;
   response: string;
+}
+
+export type ChatPauseStatus = "paused" | "active";
+
+export interface ChatPauseState {
+  chat_id: number;
+  status: ChatPauseStatus;
+  paused_at: number;
+  paused_until?: number;
+  reason?: string;
+  paused_by_user_id?: number;
+  resumed_at?: number;
+  is_active: boolean;
 }
 
 export type LlmJobKind = "ask" | "ask_group" | "verify";
@@ -606,6 +632,151 @@ function mapLlmJobRow(row: any): LlmJob {
   };
 }
 
+function mapChatPauseStateRow(row: any): ChatPauseState {
+  return {
+    chat_id: row.chat_id,
+    status: row.status,
+    paused_at: row.paused_at,
+    paused_until: row.paused_until ?? undefined,
+    reason: row.reason ?? undefined,
+    paused_by_user_id: row.paused_by_user_id ?? undefined,
+    resumed_at: row.resumed_at ?? undefined,
+    is_active: false,
+  };
+}
+
+export function setChatPauseState(
+  db: Database,
+  params: {
+    chatId: number;
+    pausedByUserId?: number;
+    pausedUntil?: number;
+    reason?: string;
+    pausedAt?: number;
+  },
+): ChatPauseState {
+  const pausedAt = params.pausedAt ?? Math.floor(Date.now() / 1000);
+
+  db.query(
+    `
+      INSERT INTO chat_pause_states (
+        chat_id,
+        status,
+        paused_at,
+        paused_until,
+        reason,
+        paused_by_user_id,
+        resumed_at
+      ) VALUES (
+        $chat_id,
+        'paused',
+        $paused_at,
+        $paused_until,
+        $reason,
+        $paused_by_user_id,
+        NULL
+      )
+      ON CONFLICT(chat_id) DO UPDATE SET
+        status = 'paused',
+        paused_at = excluded.paused_at,
+        paused_until = excluded.paused_until,
+        reason = excluded.reason,
+        paused_by_user_id = excluded.paused_by_user_id,
+        resumed_at = NULL
+    `,
+  ).run({
+    $chat_id: params.chatId,
+    $paused_at: pausedAt,
+    $paused_until: params.pausedUntil ?? null,
+    $reason: params.reason ?? null,
+    $paused_by_user_id: params.pausedByUserId ?? null,
+  });
+
+  return {
+    chat_id: params.chatId,
+    status: "paused",
+    paused_at: pausedAt,
+    paused_until: params.pausedUntil,
+    reason: params.reason,
+    paused_by_user_id: params.pausedByUserId,
+    resumed_at: undefined,
+    is_active: true,
+  };
+}
+
+export function resumeChatPause(
+  db: Database,
+  chatId: number,
+  resumedAt = Math.floor(Date.now() / 1000),
+): boolean {
+  const result = db
+    .query(
+      `
+        UPDATE chat_pause_states
+        SET status = 'active',
+            resumed_at = $resumed_at
+        WHERE chat_id = $chat_id
+          AND status = 'paused'
+      `,
+    )
+    .run({
+      $chat_id: chatId,
+      $resumed_at: resumedAt,
+    });
+
+  return result.changes > 0;
+}
+
+export function getChatPauseState(
+  db: Database,
+  chatId: number,
+  now = Math.floor(Date.now() / 1000),
+): ChatPauseState | undefined {
+  const row: any = db
+    .query(
+      `
+        SELECT *
+        FROM chat_pause_states
+        WHERE chat_id = $chat_id
+        LIMIT 1
+      `,
+    )
+    .get({ $chat_id: chatId });
+
+  if (!row) {
+    return undefined;
+  }
+
+  const state = mapChatPauseStateRow(row);
+  const isExpired =
+    state.status === "paused" &&
+    typeof state.paused_until === "number" &&
+    state.paused_until <= now;
+
+  if (isExpired) {
+    resumeChatPause(db, chatId, now);
+    return {
+      ...state,
+      status: "active",
+      resumed_at: now,
+      is_active: false,
+    };
+  }
+
+  return {
+    ...state,
+    is_active: state.status === "paused",
+  };
+}
+
+export function isChatPaused(
+  db: Database,
+  chatId: number,
+  now = Math.floor(Date.now() / 1000),
+): boolean {
+  return getChatPauseState(db, chatId, now)?.is_active === true;
+}
+
 export function enqueueLlmJob(
   db: Database,
   params: {
@@ -750,6 +921,25 @@ export function markLlmJobDone(db: Database, jobId: number): void {
       WHERE id = $id
     `,
   ).run({ $id: jobId });
+}
+
+export function markLlmJobSkipped(
+  db: Database,
+  jobId: number,
+  reason: string,
+): void {
+  db.query(
+    `
+      UPDATE llm_jobs
+      SET status = 'done',
+          available_at = CAST(strftime('%s','now') AS INTEGER),
+          last_error = $last_error
+      WHERE id = $id
+    `,
+  ).run({
+    $id: jobId,
+    $last_error: reason,
+  });
 }
 
 export function markLlmJobFailed(

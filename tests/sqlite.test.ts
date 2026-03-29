@@ -2,13 +2,17 @@ import { Database } from "bun:sqlite";
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import {
   buildTelegramMessageRecord,
+  getChatPauseState,
   getHeresyCacheEntry,
   getMessageByChatAndMessageId,
   getMessagesByChat,
   getReplyChainMessages,
   getUserMessagesForHeresy,
+  isChatPaused,
   mapToTelegramRawMessage,
   queryMessages,
+  resumeChatPause,
+  setChatPauseState,
   setupSchema,
   storeHeresyCacheEntry,
   storeTelegramMessage,
@@ -24,6 +28,7 @@ describe("sqlite message storage", () => {
   beforeEach(() => {
     db.run("DELETE FROM messages");
     db.run("DELETE FROM heresy_cache");
+    db.run("DELETE FROM chat_pause_states");
   });
 
   it("stores messages and filters by chat and bot flag", () => {
@@ -543,6 +548,53 @@ describe("sqlite message storage", () => {
       expect(getHeresyCacheEntry(db, 3, 31)?.response).toBe("Chat 3 User 31");
       expect(getHeresyCacheEntry(db, 4, 30)?.response).toBe("Chat 4 User 30");
       expect(getHeresyCacheEntry(db, 4, 31)).toBeUndefined();
+    });
+  });
+
+  describe("chat pause states", () => {
+    it("stores an active pause state per chat", () => {
+      setChatPauseState(db, {
+        chatId: 77,
+        pausedByUserId: 9,
+        reason: "limpieza",
+        pausedAt: 1_700_000_000,
+      });
+
+      const state = getChatPauseState(db, 77, 1_700_000_100);
+      expect(state).toBeDefined();
+      expect(state?.status).toBe("paused");
+      expect(state?.is_active).toBe(true);
+      expect(state?.reason).toBe("limpieza");
+      expect(state?.paused_by_user_id).toBe(9);
+      expect(isChatPaused(db, 77, 1_700_000_100)).toBe(true);
+    });
+
+    it("expires temporary pauses when they are queried after paused_until", () => {
+      setChatPauseState(db, {
+        chatId: 78,
+        pausedAt: 1_700_000_000,
+        pausedUntil: 1_700_000_600,
+      });
+
+      const state = getChatPauseState(db, 78, 1_700_000_601);
+      expect(state?.status).toBe("active");
+      expect(state?.is_active).toBe(false);
+      expect(state?.resumed_at).toBe(1_700_000_601);
+      expect(isChatPaused(db, 78, 1_700_000_601)).toBe(false);
+    });
+
+    it("resumes an active pause explicitly", () => {
+      setChatPauseState(db, {
+        chatId: 79,
+        pausedAt: 1_700_000_000,
+      });
+
+      expect(resumeChatPause(db, 79, 1_700_000_050)).toBe(true);
+
+      const state = getChatPauseState(db, 79, 1_700_000_051);
+      expect(state?.status).toBe("active");
+      expect(state?.is_active).toBe(false);
+      expect(state?.resumed_at).toBe(1_700_000_050);
     });
   });
 });
