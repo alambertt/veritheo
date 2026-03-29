@@ -35,6 +35,48 @@ describe("telegram formatting", () => {
     expect(result.text).toBe("Texto con *asterisco suelto");
     expect(result.entities).toEqual([]);
   });
+
+  it("converts markdown links into Telegram text_link entities", () => {
+    const result = buildTelegramFormattedText(
+      "Lee [esta fuente](https://example.com/docs) ahora",
+    );
+
+    expect(result.text).toBe("Lee esta fuente ahora");
+    expect(result.entities).toEqual([
+      {
+        type: "text_link",
+        offset: 4,
+        length: "esta fuente".length,
+        url: "https://example.com/docs",
+      },
+    ]);
+  });
+
+  it("supports citation-style markdown links like [[1]](url)", () => {
+    const result = buildTelegramFormattedText(
+      "Cita [[1]](https://example.com/ref) aquí",
+    );
+
+    expect(result.text).toBe("Cita [1] aquí");
+    expect(result.entities).toEqual([
+      {
+        type: "text_link",
+        offset: 5,
+        length: "[1]".length,
+        url: "https://example.com/ref",
+      },
+    ]);
+  });
+
+  it("preserves malformed markdown links as literal text", () => {
+    const result = buildTelegramFormattedText(
+      "Texto con [link roto](https://example.com",
+    );
+
+    expect(result.text).toBe("Texto con [link roto](https://example.com");
+    expect(result.entities).toEqual([]);
+  });
+
   it("filters out emojis that are not in the premium mapping", () => {
     const result = buildTelegramFormattedText("Hola 🙂 🤡 mundo ✨", {
       "🤡": "123",
