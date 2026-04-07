@@ -47,6 +47,12 @@ export async function detectUserHeresy(
       // model: zhipu(ZHIPU_MODEL),
       model: google(GOOGLE_MODEL_LATEST),
       system: heresyPrompt,
+      providerOptions: {
+        google: {
+          serviceTier: 'flex',
+        },
+      },
+      timeout: 600000, // 10 minutes for Flex tier
       messages: [{ role: "user", content: userContent }],
     },
     streamOptions,

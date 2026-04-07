@@ -72,6 +72,12 @@ export async function askHandler(
           tools: {
             google_search: googleSearchTool,
           },
+          providerOptions: {
+            google: {
+              serviceTier: 'flex',
+            },
+          },
+          timeout: 600000, // 10 minutes for Flex tier
           messages,
         },
         options,

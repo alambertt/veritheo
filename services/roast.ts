@@ -39,6 +39,12 @@ export async function roastMessageContent(
     {
       model: google(GOOGLE_MODEL_BASIC),
       system: roastPrompt,
+      providerOptions: {
+        google: {
+          serviceTier: 'flex',
+        },
+      },
+      timeout: 600000, // 10 minutes for Flex tier
       messages: [{ role: "user", content: userContent }],
     },
     streamOptions,

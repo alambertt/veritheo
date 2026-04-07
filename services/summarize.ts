@@ -26,6 +26,12 @@ export async function summarizeText(
   const { text: summaryCandidate, usage } = await generateText({
     model: google(GOOGLE_MODEL_BASIC),
     system: systemPrompt.replace("{{limit}}", String(limitChars)),
+    providerOptions: {
+      google: {
+        serviceTier: 'flex',
+      },
+    },
+    timeout: 600000, // 10 minutes for Flex tier
     messages: [
       {
         role: "user",
