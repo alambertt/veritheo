@@ -9,7 +9,11 @@ export async function replyWithLLMMessage(
   ctx: Context,
   db: Database,
   text: string,
-  options?: { preferMarkdown?: boolean; replyToMessageId?: number },
+  options?: {
+    preferMarkdown?: boolean;
+    replyToMessageId?: number;
+    messageThreadId?: number;
+  },
 ) {
   if (!ctx.chat?.id) {
     throw new Error("Missing chat id for Telegram reply.");
@@ -21,6 +25,10 @@ export async function replyWithLLMMessage(
       : ctx.message?.message_id;
   return sendTelegramText(ctx.api, db, {
     chatId: ctx.chat.id,
+    messageThreadId:
+      typeof options?.messageThreadId === "number"
+        ? options.messageThreadId
+        : ctx.message?.message_thread_id,
     text,
     preferMarkdown: options?.preferMarkdown,
     replyToMessageId,

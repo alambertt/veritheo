@@ -41,6 +41,7 @@ export async function sendTelegramText(
   db: Database,
   params: {
     chatId: number;
+    messageThreadId?: number;
     text: string;
     replyToMessageId?: number;
     preferMarkdown?: boolean;
@@ -53,12 +54,17 @@ export async function sendTelegramText(
   }
 
   const limitedText = await limitTelegramText(params.text);
+  const threadOptions =
+    typeof params.messageThreadId === "number"
+      ? { message_thread_id: params.messageThreadId }
+      : {};
   const replyOptions = params.replyToMessageId
     ? {
+        ...threadOptions,
         reply_to_message_id: params.replyToMessageId,
         allow_sending_without_reply: params.allowSendingWithoutReply ?? true,
       }
-    : {};
+    : threadOptions;
   const formatted = buildTelegramFormattedText(
     limitedText,
     TELEGRAM_CUSTOM_EMOJI_MAP,
@@ -110,6 +116,9 @@ export async function sendTelegramText(
       );
       const rawMessage = {
         ...mapToTelegramRawMessage(sentMessage),
+        ...(params.messageThreadId
+          ? { message_thread_id: params.messageThreadId }
+          : {}),
         ...(params.replyToMessageId
           ? { reply_to_message_id: params.replyToMessageId }
           : {}),

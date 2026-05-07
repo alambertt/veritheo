@@ -8,6 +8,7 @@ const CREATE_MESSAGES_TABLE = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id INTEGER NOT NULL,
     chat_id INTEGER NOT NULL,
+    message_thread_id INTEGER,
     chat_type TEXT NOT NULL,
     chat_title TEXT,
     chat_username TEXT,
@@ -42,6 +43,7 @@ const CREATE_LLM_JOBS_TABLE = `
     kind TEXT NOT NULL,
     status TEXT NOT NULL,
     chat_id INTEGER NOT NULL,
+    message_thread_id INTEGER,
     request_message_id INTEGER NOT NULL,
     question TEXT NOT NULL,
     context_messages_json TEXT,
@@ -122,6 +124,21 @@ const CREATE_BROADCAST_DELIVERIES_JOB_STATUS_INDEX = `
 
 const insertMessageStatements = new WeakMap<Database, Statement>();
 
+function ensureColumn(
+  db: Database,
+  tableName: string,
+  columnName: string,
+  definition: string,
+) {
+  const rows = db.query(`PRAGMA table_info(${tableName})`).all() as Array<{
+    name?: string;
+  }>;
+  const exists = rows.some((row) => row.name === columnName);
+  if (!exists) {
+    db.run(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
+}
+
 export function initializeDatabase(readonly = false): Database {
   const db = new Database(DATABASE_NAME, {
     readonly,
@@ -137,9 +154,11 @@ export function initializeDatabase(readonly = false): Database {
 
 export function setupSchema(db: Database) {
   db.run(CREATE_MESSAGES_TABLE);
+  ensureColumn(db, "messages", "message_thread_id", "INTEGER");
   db.run(CREATE_HERESY_CACHE_TABLE);
   db.run(CREATE_HERESY_CACHE_INDEX);
   db.run(CREATE_LLM_JOBS_TABLE);
+  ensureColumn(db, "llm_jobs", "message_thread_id", "INTEGER");
   db.run(CREATE_LLM_JOBS_STATUS_INDEX);
   db.run(CREATE_LLM_JOBS_CHAT_INDEX);
   db.run(CREATE_CHAT_PAUSE_STATES_TABLE);
@@ -151,6 +170,7 @@ export function setupSchema(db: Database) {
 
 export type TelegramRawMessage = {
   message_id: number;
+  message_thread_id?: number;
   reply_to_message_id?: number;
   date: number;
   chat: {
@@ -173,6 +193,7 @@ export type TelegramRawMessage = {
 export interface TelegramMessageRecord {
   message_id: number;
   chat_id: number;
+  message_thread_id?: number;
   chat_type: string;
   chat_title?: string;
   chat_username?: string;
@@ -219,6 +240,7 @@ export interface LlmJob {
   kind: LlmJobKind;
   status: LlmJobStatus;
   chat_id: number;
+  message_thread_id?: number;
   request_message_id: number;
   question: string;
   context_messages: string[];
@@ -309,9 +331,14 @@ export function mapToTelegramRawMessage(message: Message): TelegramRawMessage {
     typeof message.reply_to_message.message_id === "number"
       ? message.reply_to_message.message_id
       : undefined;
+  const messageThreadId =
+    typeof message.message_thread_id === "number"
+      ? message.message_thread_id
+      : undefined;
 
   return {
     message_id: message.message_id,
+    message_thread_id: messageThreadId,
     reply_to_message_id: replyToMessageId,
     date: message.date,
     chat: mapChat(message.chat),
@@ -327,6 +354,7 @@ export function buildTelegramMessageRecord(
   return {
     message_id: message.message_id,
     chat_id: message.chat.id,
+    message_thread_id: message.message_thread_id,
     chat_type: message.chat.type,
     chat_title: message.chat.title,
     chat_username: message.chat.username,
@@ -352,6 +380,7 @@ export function storeTelegramMessage(
       INSERT INTO messages (
         message_id,
         chat_id,
+        message_thread_id,
         chat_type,
         chat_title,
         chat_username,
@@ -366,6 +395,7 @@ export function storeTelegramMessage(
       ) VALUES (
         $message_id,
         $chat_id,
+        $message_thread_id,
         $chat_type,
         $chat_title,
         $chat_username,
@@ -385,6 +415,7 @@ export function storeTelegramMessage(
   insertMessageStatement.run({
     $message_id: message.message_id,
     $chat_id: message.chat_id,
+    $message_thread_id: message.message_thread_id ?? null,
     $chat_type: message.chat_type,
     $chat_title: message.chat_title ?? null,
     $chat_username: message.chat_username ?? null,
@@ -429,6 +460,7 @@ function mapStoredMessageRow(row: any): StoredTelegramMessage {
     id: row.id,
     message_id: row.message_id,
     chat_id: row.chat_id,
+    message_thread_id: row.message_thread_id ?? undefined,
     chat_type: row.chat_type,
     chat_title: row.chat_title ?? undefined,
     chat_username: row.chat_username ?? undefined,
@@ -447,17 +479,29 @@ function mapStoredMessageRow(row: any): StoredTelegramMessage {
 export function getMessagesByChat(
   db: Database,
   chatId: number,
-  options: { limit?: number; offset?: number; order?: "asc" | "desc" } = {},
+  options: {
+    limit?: number;
+    offset?: number;
+    order?: "asc" | "desc";
+    messageThreadId?: number | null;
+  } = {},
 ): StoredTelegramMessage[] {
   const limit = options.limit ?? 100;
   const offset = options.offset ?? 0;
   const order = options.order ?? "desc";
 
+  const threadFilter =
+    options.messageThreadId === undefined
+      ? ""
+      : options.messageThreadId === null
+        ? "AND message_thread_id IS NULL"
+        : "AND message_thread_id = $message_thread_id";
   const query = db.query(
     `
       SELECT *
       FROM messages
       WHERE chat_id = $chat_id
+        ${threadFilter}
       ORDER BY date ${order.toUpperCase()}
       LIMIT $limit OFFSET $offset
     `,
@@ -465,6 +509,9 @@ export function getMessagesByChat(
 
   const rows = query.all({
     $chat_id: chatId,
+    ...(typeof options.messageThreadId === "number"
+      ? { $message_thread_id: options.messageThreadId }
+      : {}),
     $limit: limit,
     $offset: offset,
   });
@@ -720,6 +767,7 @@ function mapLlmJobRow(row: any): LlmJob {
     kind: row.kind,
     status: row.status,
     chat_id: row.chat_id,
+    message_thread_id: row.message_thread_id ?? undefined,
     request_message_id: row.request_message_id,
     question: row.question,
     context_messages: contextMessages,
@@ -915,6 +963,7 @@ export function enqueueLlmJob(
   params: {
     kind: LlmJobKind;
     chatId: number;
+    messageThreadId?: number;
     requestMessageId: number;
     question: string;
     contextMessages?: string[];
@@ -928,6 +977,7 @@ export function enqueueLlmJob(
         kind,
         status,
         chat_id,
+        message_thread_id,
         request_message_id,
         question,
         context_messages_json,
@@ -939,6 +989,7 @@ export function enqueueLlmJob(
         $kind,
         'pending',
         $chat_id,
+        $message_thread_id,
         $request_message_id,
         $question,
         $context_messages_json,
@@ -953,6 +1004,7 @@ export function enqueueLlmJob(
   const result = query.run({
     $kind: params.kind,
     $chat_id: params.chatId,
+    $message_thread_id: params.messageThreadId ?? null,
     $request_message_id: params.requestMessageId,
     $question: params.question,
     $context_messages_json: params.contextMessages
@@ -1124,17 +1176,30 @@ export function markLlmJobFailed(
 export function countPendingLlmJobsForChat(
   db: Database,
   chatId: number,
+  messageThreadId?: number | null,
 ): number {
+  const threadFilter =
+    messageThreadId === undefined
+      ? ""
+      : messageThreadId === null
+        ? "AND message_thread_id IS NULL"
+        : "AND message_thread_id = $message_thread_id";
   const row: any = db
     .query(
       `
         SELECT COUNT(*) AS count
         FROM llm_jobs
         WHERE chat_id = $chat_id
+          ${threadFilter}
           AND status IN ('pending', 'processing')
       `,
     )
-    .get({ $chat_id: chatId });
+    .get({
+      $chat_id: chatId,
+      ...(typeof messageThreadId === "number"
+        ? { $message_thread_id: messageThreadId }
+        : {}),
+    });
 
   return Number(row?.count ?? 0);
 }

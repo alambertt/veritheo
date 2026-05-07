@@ -2,6 +2,9 @@ import { Database } from "bun:sqlite";
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import {
   buildTelegramMessageRecord,
+  claimNextLlmJob,
+  countPendingLlmJobsForChat,
+  enqueueLlmJob,
   getChatPauseState,
   getHeresyCacheEntry,
   getMessageByChatAndMessageId,
@@ -29,6 +32,7 @@ describe("sqlite message storage", () => {
     db.run("DELETE FROM messages");
     db.run("DELETE FROM heresy_cache");
     db.run("DELETE FROM chat_pause_states");
+    db.run("DELETE FROM llm_jobs");
   });
 
   it("stores messages and filters by chat and bot flag", () => {
@@ -129,6 +133,19 @@ describe("sqlite message storage", () => {
     expect(mapped.reply_to_message_id).toBe(99);
   });
 
+  it("maps Telegram message_thread_id when present", () => {
+    const mapped = mapToTelegramRawMessage({
+      message_id: 101,
+      message_thread_id: 17,
+      date: 1_700_000_420,
+      chat: { id: 555, type: "private" },
+      text: "Threaded message",
+    } as any);
+
+    const record = buildTelegramMessageRecord(mapped);
+    expect(record.message_thread_id).toBe(17);
+  });
+
   it("filters with text and date ranges", () => {
     storeTelegramMessage(
       db,
@@ -173,6 +190,126 @@ describe("sqlite message storage", () => {
     const messages = getMessagesByChat(db, 12);
     expect(messages).toHaveLength(1);
     expect(messages[0]?.message_id).toBe(21);
+  });
+
+  it("filters messages by thread when requested", () => {
+    const base = {
+      chat: { id: 14, type: "private" },
+      date: 1_700_000_720,
+    };
+
+    storeTelegramMessage(
+      db,
+      buildTelegramMessageRecord({
+        ...base,
+        message_id: 1,
+        message_thread_id: 10,
+        text: "Topic A",
+      }),
+    );
+    storeTelegramMessage(
+      db,
+      buildTelegramMessageRecord({
+        ...base,
+        message_id: 2,
+        message_thread_id: 20,
+        text: "Topic B",
+      }),
+    );
+    storeTelegramMessage(
+      db,
+      buildTelegramMessageRecord({
+        ...base,
+        message_id: 3,
+        text: "No topic",
+      }),
+    );
+
+    expect(
+      getMessagesByChat(db, 14, { messageThreadId: 10 }).map(
+        (message) => message.text,
+      ),
+    ).toEqual(["Topic A"]);
+    expect(
+      getMessagesByChat(db, 14, { messageThreadId: null }).map(
+        (message) => message.text,
+      ),
+    ).toEqual(["No topic"]);
+  });
+
+  it("migrates existing schemas with missing thread columns", () => {
+    const legacyDb = new Database(":memory:");
+    legacyDb.run(`
+      CREATE TABLE messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id INTEGER NOT NULL,
+        chat_id INTEGER NOT NULL,
+        chat_type TEXT NOT NULL,
+        date INTEGER NOT NULL
+      )
+    `);
+    legacyDb.run(`
+      CREATE TABLE llm_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        chat_id INTEGER NOT NULL,
+        request_message_id INTEGER NOT NULL,
+        question TEXT NOT NULL,
+        context_messages_json TEXT,
+        created_at INTEGER NOT NULL,
+        available_at INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT
+      )
+    `);
+
+    setupSchema(legacyDb);
+
+    const messageColumns = legacyDb
+      .query("PRAGMA table_info(messages)")
+      .all() as Array<{ name: string }>;
+    const jobColumns = legacyDb
+      .query("PRAGMA table_info(llm_jobs)")
+      .all() as Array<{ name: string }>;
+
+    expect(messageColumns.some((column) => column.name === "message_thread_id"))
+      .toBe(true);
+    expect(jobColumns.some((column) => column.name === "message_thread_id")).toBe(
+      true,
+    );
+  });
+
+  it("enqueues, counts, and claims LLM jobs with thread ids", () => {
+    const chatId = 15;
+    const firstJobId = enqueueLlmJob(db, {
+      kind: "ask",
+      chatId,
+      messageThreadId: 100,
+      requestMessageId: 1,
+      question: "Topic question",
+    });
+    enqueueLlmJob(db, {
+      kind: "ask",
+      chatId,
+      messageThreadId: 200,
+      requestMessageId: 2,
+      question: "Other topic",
+    });
+    enqueueLlmJob(db, {
+      kind: "ask",
+      chatId,
+      requestMessageId: 3,
+      question: "No topic",
+    });
+
+    expect(firstJobId).toBeGreaterThan(0);
+    expect(countPendingLlmJobsForChat(db, chatId, 100)).toBe(1);
+    expect(countPendingLlmJobsForChat(db, chatId, null)).toBe(1);
+    expect(countPendingLlmJobsForChat(db, chatId)).toBe(3);
+
+    const claimed = claimNextLlmJob(db);
+    expect(claimed?.message_thread_id).toBe(100);
   });
 
   it("returns reply chain messages in chronological order", () => {

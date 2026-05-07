@@ -38,6 +38,7 @@ async function sendAndPersistMessage(
   db: Database,
   params: {
     chatId: number;
+    messageThreadId?: number;
     text: string;
     replyToMessageId?: number;
     preferMarkdown?: boolean;
@@ -68,6 +69,7 @@ async function processJob(
     if (text) {
       const sent = await sendAndPersistMessage(bot, db, {
         chatId: job.chat_id,
+        messageThreadId: job.message_thread_id,
         text,
         replyToMessageId: job.request_message_id,
       });
@@ -80,6 +82,7 @@ async function processJob(
   const draftStreamer = createLlmDraftStreamerForChat({
     api: bot.api,
     chatId: job.chat_id,
+    messageThreadId: job.message_thread_id,
   });
 
   let text: string | undefined;
@@ -92,8 +95,9 @@ async function processJob(
       draftStreamer
         ? {
             onPartialText: (partialText) => draftStreamer.update(partialText),
+            route: job.kind === "ask_group" ? "/ask_group" : "/ask",
           }
-        : undefined,
+        : { route: job.kind === "ask_group" ? "/ask_group" : "/ask" },
     );
 
     text = response.text;
@@ -108,6 +112,7 @@ async function processJob(
   if (text) {
     const sent = await sendAndPersistMessage(bot, db, {
       chatId: job.chat_id,
+      messageThreadId: job.message_thread_id,
       text,
       replyToMessageId: job.request_message_id,
     });
@@ -120,6 +125,7 @@ async function processJob(
   if (sourcesMessage) {
     const sent = await sendAndPersistMessage(bot, db, {
       chatId: job.chat_id,
+      messageThreadId: job.message_thread_id,
       text: sourcesMessage,
       replyToMessageId: job.request_message_id,
     });
@@ -190,6 +196,7 @@ export function startLlmQueueWorker(
               try {
                 await sendAndPersistMessage(bot, db, {
                   chatId: job.chat_id,
+                  messageThreadId: job.message_thread_id,
                   text: GENERIC_ERROR_MESSAGE,
                   replyToMessageId: job.request_message_id,
                 });

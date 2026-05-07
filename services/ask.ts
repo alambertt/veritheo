@@ -56,10 +56,11 @@ function isGoogleTransientFailure(error: unknown) {
 export async function askHandler(
   question: string,
   messagesContext?: string[],
-  options?: PartialTextOptions,
+  options?: PartialTextOptions & { route?: string },
 ) {
   const messages = buildAskMessages(question, messagesContext);
-  const route = messagesContext?.length ? "/ask_group" : "/ask";
+  const route =
+    options?.route ?? (messagesContext?.length ? "/ask_group" : "/ask");
 
   try {
     const googleSearchTool = google.tools.googleSearch({}) as Tool<any, any>;

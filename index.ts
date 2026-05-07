@@ -185,6 +185,11 @@ const getTelegramMessageText = (message?: {
   return typeof message.caption === "string" ? message.caption : undefined;
 };
 
+const getTelegramMessageThreadId = (message?: { message_thread_id?: unknown }) =>
+  typeof message?.message_thread_id === "number"
+    ? message.message_thread_id
+    : undefined;
+
 const isReplyToThisBot = (
   replyToMessage:
     | { from?: { is_bot?: boolean; username?: string } }
@@ -409,17 +414,33 @@ bot.command("ask", async (ctx) => {
       await ctx.reply(GENERIC_ERROR_MESSAGE);
       return;
     }
+    const messageThreadId = getTelegramMessageThreadId(ctx.message);
+    const contextMessages =
+      ctx.chat?.type === "private"
+        ? buildRecentPrivateContextMessages(
+            chatId,
+            requestMessageId,
+            messageThreadId,
+          )
+        : undefined;
 
     enqueueLlmJob(database, {
       kind: "ask",
       chatId,
+      messageThreadId,
       requestMessageId,
       question: question.trim(),
+      contextMessages,
     });
-    const pendingJobs = countPendingLlmJobsForChat(database, chatId);
+    const pendingJobs = countPendingLlmJobsForChat(
+      database,
+      chatId,
+      ctx.chat?.type === "private" ? messageThreadId ?? null : undefined,
+    );
     await replyWithLLMMessage(ctx, database, buildQueueReceivedMessage(pendingJobs), {
       preferMarkdown: false,
       replyToMessageId: requestMessageId,
+      messageThreadId,
     });
   } catch (error) {
     console.error("Failed to process /ask command:", error);
@@ -443,6 +464,29 @@ const buildRecentGroupContextMessages = (
   const storedMessages = getMessagesByChat(database, chatId, {
     limit: 10,
     order: "desc",
+  });
+  const textMessages = storedMessages
+    .filter(
+      (msg) =>
+        msg.text &&
+        msg.text.trim() !== "" &&
+        msg.message_id !== currentMessageId,
+    )
+    .map((msg) => msg.text!.trim())
+    .reverse();
+
+  return textMessages.length > 0 ? textMessages : undefined;
+};
+
+const buildRecentPrivateContextMessages = (
+  chatId: number,
+  currentMessageId?: number,
+  messageThreadId?: number,
+): string[] | undefined => {
+  const storedMessages = getMessagesByChat(database, chatId, {
+    limit: 10,
+    order: "desc",
+    messageThreadId: messageThreadId ?? null,
   });
   const textMessages = storedMessages
     .filter(
@@ -1049,6 +1093,7 @@ bot.on("message", async (ctx) => {
 
     const chatId = ctx.chat?.id;
     const requestMessageId = ctx.message.message_id;
+    const messageThreadId = getTelegramMessageThreadId(ctx.message);
 
     if (!chatId || !requestMessageId) {
       await ctx.reply(GENERIC_ERROR_MESSAGE);
@@ -1057,7 +1102,13 @@ bot.on("message", async (ctx) => {
 
     const jobKind = privateQuestion ? "ask" : "ask_group";
     const contextMessages =
-      jobKind === "ask_group"
+      privateQuestion
+        ? buildRecentPrivateContextMessages(
+            chatId,
+            requestMessageId,
+            messageThreadId,
+          )
+        : jobKind === "ask_group"
         ? buildRecentGroupContextMessages(chatId, requestMessageId)
         : undefined;
 
@@ -1068,14 +1119,20 @@ bot.on("message", async (ctx) => {
     enqueueLlmJob(database, {
       kind: jobKind,
       chatId,
+      messageThreadId: privateQuestion ? messageThreadId : undefined,
       requestMessageId,
       question,
       contextMessages,
     });
-    const pendingJobs = countPendingLlmJobsForChat(database, chatId);
+    const pendingJobs = countPendingLlmJobsForChat(
+      database,
+      chatId,
+      privateQuestion ? messageThreadId ?? null : undefined,
+    );
     await replyWithLLMMessage(ctx, database, buildQueueReceivedMessage(pendingJobs), {
       preferMarkdown: false,
       replyToMessageId: requestMessageId,
+      messageThreadId: privateQuestion ? messageThreadId : undefined,
     });
   } catch (error) {
     console.error("Failed to persist message:", error);

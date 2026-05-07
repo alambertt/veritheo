@@ -37,13 +37,17 @@ export function createLlmDraftStreamerForContext(ctx: Context) {
   ) {
     return undefined;
   }
-  return createTelegramDraftStreamer(ctx.api, { chatId: chatId as number });
+  return createTelegramDraftStreamer(ctx.api, {
+    chatId: chatId as number,
+    messageThreadId: ctx.message?.message_thread_id,
+  });
 }
 
 export function createLlmDraftStreamerForChat(params: {
   api: Context["api"];
   chatId: number;
   chatType?: TelegramChatType;
+  messageThreadId?: number;
 }) {
   if (
     !shouldUseLlmDraftStreaming({
@@ -56,5 +60,6 @@ export function createLlmDraftStreamerForChat(params: {
 
   return createTelegramDraftStreamer(params.api, {
     chatId: params.chatId,
+    messageThreadId: params.messageThreadId,
   });
 }
