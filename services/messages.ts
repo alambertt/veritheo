@@ -21,6 +21,7 @@ Comandos disponibles:
 /verify - Responde a un mensaje para verificar su contenido y citar posibles errores
 /roast - Refuta un argumento usando los mejores contraargumentos del espectro teológico contrario
 /my_heresy - Descubre tu herejía histórica según tus mensajes en el grupo
+/theology_poll - Crea una encuesta quiz de teología en el grupo
 
 En chat privado también puedes escribirme directamente sin usar /ask.
 Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orientación.
@@ -63,6 +64,10 @@ Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orie
     "😇 Este sabio infalible está más allá de las herejías terrenales. Mejor solo admirarlo desde lejos. ✨",
   heresyInsufficientMaterial:
     "No encontré suficientes mensajes largos del último año para ese usuario. Necesito más material de herejía.",
+  theologyPollGroupOnly:
+    "Este comando solo funciona en grupos donde Veritheo puede crear encuestas.",
+  theologyPollFailed:
+    "No pude crear la encuesta teológica. Intenta nuevamente más tarde.",
   pauseGroupOnly:
     "Este comando solo funciona en grupos donde Veritheo puede pausarse o reanudarse.",
   pauseAdminOnly:

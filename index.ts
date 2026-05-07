@@ -56,6 +56,10 @@ import { getPrivateChatAutoAskQuestion } from "./services/private-chat-auto-ask"
 import { getGroupMentionAutoAskQuestion } from "./services/group-mention-auto-ask";
 import { findSimilarBotMessageInChat } from "./services/self-message-guard";
 import { startTypingIndicator } from "./services/typing-indicator";
+import {
+  generateTheologyQuizPoll,
+  sendTheologyQuizPoll,
+} from "./services/theology-poll";
 import { SIMILARITY_THRESHOLD } from "./constants";
 
 config();
@@ -565,6 +569,49 @@ bot.command("ask_group", async (ctx) => {
     } catch (replyError) {
       console.error("Failed to send /ask_group error message:", replyError);
       await notifyError("Failed to send /ask_group error message", replyError);
+    }
+  }
+});
+
+bot.command("theology_poll", async (ctx) => {
+  try {
+    if (!isGroupChatType(ctx.chat?.type)) {
+      await ctx.reply(MESSAGES.theologyPollGroupOnly);
+      return;
+    }
+
+    if (!(await ensureGroupAdmin(ctx))) {
+      return;
+    }
+
+    const prompt = getCommandArgs(ctx.message?.text);
+    logCommandInvocation(ctx, "/theology_poll", [
+      `Prompt: ${prompt || "[random topic]"}`,
+    ]);
+
+    const stopTyping = startTypingIndicator(ctx);
+    try {
+      const poll = await generateTheologyQuizPoll(prompt);
+      const messageThreadId = getTelegramMessageThreadId(ctx.message);
+      await sendTheologyQuizPoll(ctx.api, {
+        chatId: ctx.chat.id,
+        messageThreadId,
+        poll,
+      });
+    } finally {
+      stopTyping();
+    }
+  } catch (error) {
+    console.error("Failed to process /theology_poll command:", error);
+    await notifyError(
+      `Failed to process /theology_poll command (chatId=${ctx.chat?.id ?? "unknown"})`,
+      error,
+    );
+    try {
+      await ctx.reply(MESSAGES.theologyPollFailed);
+    } catch (replyError) {
+      console.error("Failed to send /theology_poll error message:", replyError);
+      await notifyError("Failed to send /theology_poll error message", replyError);
     }
   }
 });

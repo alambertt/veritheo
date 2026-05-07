@@ -4,6 +4,7 @@ export const GOOGLE_MODEL_LATEST = "gemini-3.1-pro-preview";
 export const SIMILARITY_THRESHOLD = 0.91;
 
 export const GROK_MODEL = "grok-4-1-fast-reasoning";
+export const THEOLOGY_POLL_GROK_MODEL = "grok-4.3";
 export const ZHIPU_MODEL = "glm-5";
 
 export const TELEGRAM_CUSTOM_EMOJI_MAP = {
