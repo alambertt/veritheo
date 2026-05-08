@@ -102,6 +102,34 @@ describe("AI-backed services", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("falls back to grok when google returns AI_NoOutputGeneratedError", async () => {
+    let invocation = 0;
+    generateTextImpl = async (params) => {
+      invocation += 1;
+
+      if (invocation === 1) {
+        const error = new Error(
+          "AI_NoOutputGeneratedError: No output generated. Check the stream for errors.",
+        );
+        error.name = "AI_NoOutputGeneratedError";
+        throw error;
+      }
+
+      return {
+        text: "grok fallback answer",
+        sources: [],
+        providerMetadata: {
+          xai: {},
+        },
+      };
+    };
+
+    const result = await askHandler("Question about safety-filtered content?");
+
+    expect(result.text).toBe("grok fallback answer");
+    expect(invocation).toBe(2);
+  });
+
   it("builds verification prompt with optional context", async () => {
     await verifyMessageContent("Hola", {
       authorName: "Ada",

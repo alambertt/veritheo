@@ -38,6 +38,7 @@ function isGoogleTransientFailure(error: unknown) {
 
   return (
     normalizedMessage.includes("ai_retryerror") ||
+    normalizedMessage.includes("ai_nooutputgeneratederror") ||
     normalizedMessage.includes("high demand") ||
     normalizedMessage.includes("please try again later") ||
     normalizedMessage.includes("resource_exhausted") ||
