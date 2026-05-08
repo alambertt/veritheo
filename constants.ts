@@ -26,4 +26,5 @@ export const TELEGRAM_CUSTOM_EMOJI_MAP = {
   "🕯️": "5253717838870363235",
   "🧩": "5429368540849260641",
   "🏛️": "5359778044745622115",
+  "🚀": "5445284980978621387",
 } as const satisfies Record<string, string>;
