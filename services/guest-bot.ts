@@ -23,15 +23,10 @@ type TelegramGuestMessage = {
     title?: unknown;
     username?: unknown;
   };
-  reply_to_message?: {
-    text?: unknown;
-    caption?: unknown;
-  };
 };
 
 export type GuestBotQuestion = {
   question: string;
-  contextMessages?: string[];
   messageId?: number;
   from?: {
     id?: number;
@@ -66,6 +61,24 @@ function getMentionEntityText(text: string, entity: TelegramMessageEntity) {
   return text.slice(entity.offset, entity.offset + entity.length);
 }
 
+function isBotMention(
+  text: string,
+  entity: TelegramMessageEntity,
+  botUsername?: string,
+) {
+  const normalizedBotUsername = normalizeBotUsername(botUsername);
+  if (!normalizedBotUsername || entity.type !== "mention") {
+    return false;
+  }
+
+  const mentionText = getMentionEntityText(text, entity)
+    .trim()
+    .replace(/^@/, "")
+    .toLowerCase();
+
+  return mentionText === normalizedBotUsername;
+}
+
 function isCommandText(text?: string, entities: TelegramMessageEntity[] = []) {
   if (!text) {
     return false;
@@ -84,23 +97,9 @@ function removeMatchedMentions(
   entities: TelegramMessageEntity[],
   botUsername?: string,
 ) {
-  const normalizedBotUsername = normalizeBotUsername(botUsername);
-  if (!normalizedBotUsername || entities.length === 0) {
-    return text.trim();
-  }
-
-  const matchedEntities = entities.filter((entity) => {
-    if (entity.type !== "mention") {
-      return false;
-    }
-
-    const mentionText = getMentionEntityText(text, entity)
-      .trim()
-      .replace(/^@/, "")
-      .toLowerCase();
-
-    return mentionText === normalizedBotUsername;
-  });
+  const matchedEntities = entities.filter((entity) =>
+    isBotMention(text, entity, botUsername),
+  );
 
   const sorted = [...matchedEntities].sort((a, b) => b.offset - a.offset);
   let nextText = text;
@@ -146,11 +145,14 @@ export function getGuestBotQuestion(params: {
     return undefined;
   }
 
-  const question = text
-    ? removeMatchedMentions(text, entities, params.botUsername)
-    : "";
-  const replyText = getMessageText(message.reply_to_message)?.trim();
-  const contextMessages = replyText ? [replyText] : undefined;
+  if (
+    !text ||
+    !entities.some((entity) => isBotMention(text, entity, params.botUsername))
+  ) {
+    return undefined;
+  }
+
+  const question = removeMatchedMentions(text, entities, params.botUsername);
   const metadata = {
     messageId:
       typeof message.message_id === "number" ? message.message_id : undefined,
@@ -187,15 +189,7 @@ export function getGuestBotQuestion(params: {
   };
 
   if (question) {
-    return { question, contextMessages, ...metadata };
-  }
-
-  if (replyText) {
-    return {
-      question: "Please respond to the quoted message.",
-      contextMessages,
-      ...metadata,
-    };
+    return { question, ...metadata };
   }
 
   return undefined;

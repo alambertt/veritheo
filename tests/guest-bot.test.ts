@@ -24,7 +24,7 @@ describe("guest bot helpers", () => {
     expect(result?.chat).toMatchObject({ id: -1001, title: "Theology" });
   });
 
-  it("uses a replied message as context when the summon has no text", () => {
+  it("ignores replied message context when the summon has no prompt", () => {
     const result = getGuestBotQuestion({
       message: {
         guest_query_id: "guest-123",
@@ -38,10 +38,62 @@ describe("guest bot helpers", () => {
       botUsername: "veritheo",
     });
 
-    expect(result).toMatchObject({
-      question: "Please respond to the quoted message.",
-      contextMessages: ["Original claim to analyze"],
+    expect(result).toBeUndefined();
+  });
+
+  it("does not include replied message context with a guest prompt", () => {
+    const result = getGuestBotQuestion({
+      message: {
+        guest_query_id: "guest-123",
+        text: "@veritheo answer only this",
+        entities: [{ type: "mention", offset: 0, length: 9 }],
+        from: { id: 1, is_bot: false },
+        reply_to_message: {
+          text: "Do not use this as context",
+        },
+      },
+      botUsername: "veritheo",
     });
+
+    expect(result).toEqual({
+      question: "answer only this",
+      messageId: undefined,
+      from: {
+        id: 1,
+        username: undefined,
+        first_name: undefined,
+        last_name: undefined,
+      },
+      chat: undefined,
+    });
+  });
+
+  it("ignores guest messages that do not tag the bot", () => {
+    expect(
+      getGuestBotQuestion({
+        message: {
+          guest_query_id: "guest-123",
+          text: "Can you answer this follow-up?",
+          from: { id: 1, is_bot: false },
+          reply_to_message: {
+            text: "Previous guest bot response",
+          },
+        },
+        botUsername: "veritheo",
+      }),
+    ).toBeUndefined();
+
+    expect(
+      getGuestBotQuestion({
+        message: {
+          guest_query_id: "guest-123",
+          text: "@otherbot answer this",
+          entities: [{ type: "mention", offset: 0, length: 9 }],
+          from: { id: 1, is_bot: false },
+        },
+        botUsername: "veritheo",
+      }),
+    ).toBeUndefined();
   });
 
   it("ignores bot and banned-user guest messages", () => {

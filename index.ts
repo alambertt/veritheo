@@ -330,7 +330,7 @@ bot.use(async (ctx, next) => {
   try {
     const { text, sources } = await askHandler(
       guestQuestion.question,
-      guestQuestion.contextMessages,
+      undefined,
       { route: "guest_ask" },
     );
     const sourcesMessage = buildSourcesMessage(sources);
