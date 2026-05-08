@@ -127,6 +127,18 @@ export async function sendTelegramText(
       return sentMessage;
     } catch (error) {
       lastError = error;
+
+      // Gracefully skip messages to deleted/archived threads
+      if (
+        error instanceof GrammyError &&
+        error.description.includes("message thread not found")
+      ) {
+        console.warn(
+          `Skipping message to chat ${params.chatId}: thread ${params.messageThreadId} not found.`,
+        );
+        return undefined;
+      }
+
       if (attempt !== attempts.at(-1)) {
         console.warn(
           `Telegram formatted send failed (${describeSendError(error)}). Retrying with a simpler format.`,
