@@ -15,6 +15,24 @@ import { buildTelegramFormattedText } from "./telegram-formatting";
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 type SendMessageApi = Pick<Api<RawApi>, "sendMessage">;
+type GuestQueryApi = {
+  raw: {
+    answerGuestQuery(payload: {
+      guest_query_id: string;
+      result: {
+        type: "article";
+        id: string;
+        title: string;
+        description?: string;
+        input_message_content: {
+          message_text: string;
+          parse_mode?: ParseMode;
+          entities?: MessageEntity[];
+        };
+      };
+    }): Promise<unknown>;
+  };
+};
 
 async function limitTelegramText(text: string): Promise<string> {
   if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
@@ -153,4 +171,42 @@ export async function sendTelegramText(
 
 export function describeTelegramSendError(error: unknown): string {
   return describeSendError(error);
+}
+
+export async function answerTelegramGuestQuery(
+  api: GuestQueryApi,
+  params: {
+    guestQueryId: string;
+    text: string;
+    preferMarkdown?: boolean;
+  },
+) {
+  const limitedText = await limitTelegramText(params.text);
+  const formatted = buildTelegramFormattedText(
+    limitedText,
+    TELEGRAM_CUSTOM_EMOJI_MAP,
+  );
+  const inputMessageContent =
+    formatted.entities.length > 0
+      ? {
+          message_text: formatted.text,
+          entities: formatted.entities as MessageEntity[],
+        }
+      : params.preferMarkdown === false
+        ? { message_text: limitedText }
+        : {
+            message_text: limitedText,
+            parse_mode: "Markdown" as const,
+          };
+
+  return api.raw.answerGuestQuery({
+    guest_query_id: params.guestQueryId,
+    result: {
+      type: "article",
+      id: "veritheo-answer",
+      title: "Veritheo",
+      description: "Answer from Veritheo",
+      input_message_content: inputMessageContent,
+    },
+  });
 }

@@ -1,7 +1,10 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import { setupSchema } from "../services/sqlite";
-import { sendTelegramText } from "../services/telegram-send";
+import {
+  answerTelegramGuestQuery,
+  sendTelegramText,
+} from "../services/telegram-send";
 
 describe("sendTelegramText", () => {
   const db = new Database(":memory:");
@@ -45,5 +48,34 @@ describe("sendTelegramText", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.options.message_thread_id).toBe(7);
     expect(calls[0]?.options.reply_to_message_id).toBe(49);
+  });
+
+  it("answers guest queries with an inline article result", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const api = {
+      raw: {
+        answerGuestQuery: async (payload: Record<string, unknown>) => {
+          calls.push(payload);
+          return { inline_message_id: "inline-1" };
+        },
+      },
+    };
+
+    await answerTelegramGuestQuery(api, {
+      guestQueryId: "guest-1",
+      text: "Guest response",
+      preferMarkdown: false,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.guest_query_id).toBe("guest-1");
+    expect(calls[0]?.result).toMatchObject({
+      type: "article",
+      id: "veritheo-answer",
+      title: "Veritheo",
+      input_message_content: {
+        message_text: "Guest response",
+      },
+    });
   });
 });

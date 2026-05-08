@@ -12,6 +12,7 @@ import {
 } from "./services/broadcast";
 import { startBroadcastQueueWorker } from "./services/broadcast-queue";
 import { startLlmQueueWorker } from "./services/llm-queue";
+import { askHandler } from "./services/ask";
 import {
   BANNED_COMMAND_MESSAGE,
   buildQueueReceivedMessage,
@@ -54,8 +55,11 @@ import {
 } from "./services/sqlite";
 import { getPrivateChatAutoAskQuestion } from "./services/private-chat-auto-ask";
 import { getGroupMentionAutoAskQuestion } from "./services/group-mention-auto-ask";
+import { getGuestBotQuestion, getGuestQueryId } from "./services/guest-bot";
 import { findSimilarBotMessageInChat } from "./services/self-message-guard";
 import { startTypingIndicator } from "./services/typing-indicator";
+import { buildSourcesMessage } from "./services/sources";
+import { answerTelegramGuestQuery } from "./services/telegram-send";
 import {
   generateTheologyQuizPoll,
   sendTheologyQuizPoll,
@@ -194,6 +198,17 @@ const getTelegramMessageThreadId = (message?: { message_thread_id?: unknown }) =
     ? message.message_thread_id
     : undefined;
 
+const getUpdateGuestMessage = (update: unknown) => {
+  if (!update || typeof update !== "object") {
+    return undefined;
+  }
+
+  const guestMessage = (update as { guest_message?: unknown }).guest_message;
+  return guestMessage && typeof guestMessage === "object"
+    ? guestMessage
+    : undefined;
+};
+
 const isReplyToThisBot = (
   replyToMessage:
     | { from?: { is_bot?: boolean; username?: string } }
@@ -275,6 +290,65 @@ const buildReplyContinuationContext = (
     }: ${fallbackText}`,
   ];
 };
+
+bot.use(async (ctx, next) => {
+  const guestMessage = getUpdateGuestMessage(ctx.update);
+  if (!guestMessage) {
+    return next();
+  }
+
+  const guestQueryId = getGuestQueryId(guestMessage);
+  if (!guestQueryId) {
+    await notifyError("Received guest message without guest_query_id", {
+      updateId: ctx.update.update_id,
+    });
+    return;
+  }
+
+  const guestQuestion = getGuestBotQuestion({
+    message: guestMessage,
+    botUsername: ctx.me.username,
+    bannedUserIds: BANNED_USER_IDS,
+  });
+  if (!guestQuestion) {
+    return;
+  }
+
+  logCommandInvocation(ctx, "guest_ask", [
+    `Question: ${guestQuestion.question}`,
+  ]);
+
+  try {
+    const { text, sources } = await askHandler(
+      guestQuestion.question,
+      guestQuestion.contextMessages,
+      { route: "guest_ask" },
+    );
+    const sourcesMessage = buildSourcesMessage(sources);
+    const responseText = sourcesMessage ? `${text}\n\n${sourcesMessage}` : text;
+
+    await answerTelegramGuestQuery(ctx.api as any, {
+      guestQueryId,
+      text: responseText || GENERIC_ERROR_MESSAGE,
+    });
+  } catch (error) {
+    console.error("Failed to process guest message:", error);
+    await notifyError(
+      `Failed to process guest message (updateId=${ctx.update.update_id})`,
+      error,
+    );
+    try {
+      await answerTelegramGuestQuery(ctx.api as any, {
+        guestQueryId,
+        text: GENERIC_ERROR_MESSAGE,
+        preferMarkdown: false,
+      });
+    } catch (replyError) {
+      console.error("Failed to answer guest message error:", replyError);
+      await notifyError("Failed to answer guest message error", replyError);
+    }
+  }
+});
 
 bot.use(async (ctx, next) => {
   const message = ctx.message;
