@@ -3,6 +3,8 @@ import { Bot, type Context } from "grammy";
 import {
   createChannelLogger,
   formatDisplayName,
+  formatChatLabel,
+  formatUserLabel,
 } from "./services/channel-logs";
 import { detectUserHeresy } from "./services/heresy";
 import {
@@ -314,9 +316,16 @@ bot.use(async (ctx, next) => {
     return;
   }
 
-  logCommandInvocation(ctx, "guest_ask", [
-    `Question: ${guestQuestion.question}`,
-  ]);
+  void sendChannelLog(
+    [
+      "📣 guest_ask invoked",
+      `Chat: ${formatChatLabel(guestQuestion.chat)}`,
+      `User: ${formatUserLabel(guestQuestion.from)}`,
+      `MessageId: ${guestQuestion.messageId ?? "unknown"}`,
+      `GuestQueryId: ${guestQueryId}`,
+      `QuestionLength: ${guestQuestion.question.length}`,
+    ].join("\n"),
+  );
 
   try {
     const { text, sources } = await askHandler(

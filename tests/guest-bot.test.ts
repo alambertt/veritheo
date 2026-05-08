@@ -13,12 +13,15 @@ describe("guest bot helpers", () => {
         guest_query_id: "guest-123",
         text: "@Veritheo what does covenant mean?",
         entities: [{ type: "mention", offset: 0, length: 9 }],
-        from: { id: 1, is_bot: false },
+        from: { id: 1, username: "ada", first_name: "Ada", is_bot: false },
+        chat: { id: -1001, title: "Theology" },
       },
       botUsername: "veritheo",
     });
 
     expect(result?.question).toBe("what does covenant mean?");
+    expect(result?.from).toMatchObject({ id: 1, username: "ada" });
+    expect(result?.chat).toMatchObject({ id: -1001, title: "Theology" });
   });
 
   it("uses a replied message as context when the summon has no text", () => {
@@ -35,7 +38,7 @@ describe("guest bot helpers", () => {
       botUsername: "veritheo",
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       question: "Please respond to the quoted message.",
       contextMessages: ["Original claim to analyze"],
     });
@@ -60,6 +63,22 @@ describe("guest bot helpers", () => {
         },
         botUsername: "veritheo",
         bannedUserIds: [7],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("ignores slash commands in guest messages", () => {
+    expect(
+      getGuestBotQuestion({
+        message: {
+          text: "/ask @veritheo who are you?",
+          entities: [
+            { type: "bot_command", offset: 0, length: 4 },
+            { type: "mention", offset: 5, length: 9 },
+          ],
+          from: { id: 1, is_bot: false },
+        },
+        botUsername: "veritheo",
       }),
     ).toBeUndefined();
   });
