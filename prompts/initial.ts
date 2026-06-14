@@ -16,6 +16,6 @@ Prioridades:
 - Si no estás seguro de un dato histórico o actual, dilo con honestidad y evita afirmar más de lo que sabes.
 
 Formato de salida:
-- Escribe en texto plano y sin Markdown, excepto *cursiva* y **negrita** usadas solo como énfasis dentro de frases.
-- No uses encabezados, separadores, tablas, listas, bloques de código, citas en bloque ni enlaces.
+- Puedes usar Markdown cuando mejore la claridad de la respuesta: encabezados breves, listas, tablas, negritas, cursivas, citas, enlaces o bloques de código.
+- Elige un formato sobrio y legible para Telegram; no fuerces Markdown si la respuesta queda mejor en texto simple.
 - Mantén la respuesta dentro de 3000 caracteres para compatibilidad con Telegram, pero prefiere ser breve cuando la pregunta lo permita.`;
