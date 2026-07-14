@@ -48,6 +48,17 @@ describe("getGroupMentionAutoAskQuestion", () => {
     expect(
       getGroupMentionAutoAskQuestion({
         chatType: "group",
+        text: "@veritheo pregunta",
+        botUsername: "veritheo",
+        entities: [{ type: "mention", offset: 0, length: 10 }],
+        isBot: true,
+        isAnonymousAdmin: true,
+      }),
+    ).toBe("pregunta");
+
+    expect(
+      getGroupMentionAutoAskQuestion({
+        chatType: "group",
         text: "/ask_group pregunta",
         botUsername: "veritheo",
         entities: [],

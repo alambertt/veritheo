@@ -1197,6 +1197,8 @@ bot.on("message", async (ctx) => {
     }
 
     const isCommand = isCommandMessage(ctx.message.text, ctx.message.entities);
+    const isAnonymousAdminMessage =
+      "sender_chat" in ctx.message && ctx.message.sender_chat !== undefined;
     const privateQuestion = getPrivateChatAutoAskQuestion({
       chatType: ctx.chat?.type,
       text: rawMessage.text,
@@ -1211,6 +1213,7 @@ bot.on("message", async (ctx) => {
       entities: ctx.message.entities,
       botUsername: ctx.me.username,
       isBot: ctx.message.from?.is_bot,
+      isAnonymousAdmin: isAnonymousAdminMessage,
       isCommand,
       userId: ctx.message.from?.id,
       bannedUserIds: BANNED_USER_IDS,

@@ -10,6 +10,7 @@ type GetGroupMentionAutoAskQuestionParams = {
   entities?: TelegramMessageEntity[];
   botUsername?: string;
   isBot?: boolean;
+  isAnonymousAdmin?: boolean;
   isCommand?: boolean;
   userId?: number;
   bannedUserIds?: number[];
@@ -50,7 +51,7 @@ export function getGroupMentionAutoAskQuestion(
     return undefined;
   }
 
-  if (params.isBot || params.isCommand) {
+  if ((params.isBot && !params.isAnonymousAdmin) || params.isCommand) {
     return undefined;
   }
 
