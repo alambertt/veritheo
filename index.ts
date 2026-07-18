@@ -67,6 +67,7 @@ import {
   sendTheologyQuizPoll,
 } from "./services/theology-poll";
 import { SIMILARITY_THRESHOLD } from "./constants";
+import { getMessagePlainText } from "./services/rich-message";
 
 config();
 
@@ -183,16 +184,36 @@ const isCommandMessage = (
 const getTelegramMessageText = (message?: {
   text?: unknown;
   caption?: unknown;
-}) => {
-  if (!message || typeof message !== "object") {
-    return undefined;
-  }
+  rich_message?: unknown;
+}) => getMessagePlainText(message);
 
-  if (typeof message.text === "string") {
+const getStoredMessagePlainText = (message?: {
+  text?: string;
+  raw?: unknown;
+}) => {
+  if (message?.text?.trim()) {
     return message.text;
   }
 
-  return typeof message.caption === "string" ? message.caption : undefined;
+  if (!message?.raw || typeof message.raw !== "object") {
+    return undefined;
+  }
+
+  const raw = message.raw as {
+    text?: unknown;
+    caption?: unknown;
+    rich_message?: unknown;
+    raw?: {
+      text?: unknown;
+      caption?: unknown;
+      rich_message?: unknown;
+    };
+  };
+
+  return (
+    getMessagePlainText(raw) ??
+    (raw.raw ? getMessagePlainText(raw.raw) : undefined)
+  );
 };
 
 const getTelegramMessageThreadId = (message?: { message_thread_id?: unknown }) =>
@@ -736,13 +757,14 @@ bot.command("verify", async (ctx) => {
         chatId,
         replyToId,
       );
-      if (storedMessage?.text?.trim()) {
-        messageToVerify = storedMessage.text.trim();
+      const storedText = getStoredMessagePlainText(storedMessage)?.trim();
+      if (storedText) {
+        messageToVerify = storedText;
         authorName =
           formatDisplayName([
-            storedMessage.from_first_name,
-            storedMessage.from_last_name,
-          ]) ?? storedMessage.from_username;
+            storedMessage?.from_first_name,
+            storedMessage?.from_last_name,
+          ]) ?? storedMessage?.from_username;
       }
     } catch (dbError) {
       console.error("Failed to retrieve message from database:", dbError);
@@ -755,14 +777,9 @@ bot.command("verify", async (ctx) => {
     if (!messageToVerify) {
       const replied = ctx.message.reply_to_message;
       // Fallback al payload original entregado por la API de Telegram cuando la BD no tiene el mensaje.
-      const repliedText =
-        "text" in replied && typeof replied.text === "string"
-          ? replied.text
-          : "caption" in replied && typeof replied.caption === "string"
-            ? replied.caption
-            : undefined;
-      if (repliedText?.trim()) {
-        messageToVerify = repliedText.trim();
+      const repliedText = getTelegramMessageText(replied)?.trim();
+      if (repliedText) {
+        messageToVerify = repliedText;
       }
       if (!authorName && "from" in replied && replied.from) {
         authorName =
@@ -878,14 +895,15 @@ bot.command("roast", async (ctx) => {
           chatId,
           repliedMessageId,
         );
-        if (storedMessage?.text?.trim()) {
-          messageToRoast = storedMessage.text.trim();
-          authorId = storedMessage.from_id ?? undefined;
+        const storedText = getStoredMessagePlainText(storedMessage)?.trim();
+        if (storedText) {
+          messageToRoast = storedText;
+          authorId = storedMessage?.from_id ?? undefined;
           authorName =
             formatDisplayName([
-              storedMessage.from_first_name,
-              storedMessage.from_last_name,
-            ]) ?? storedMessage.from_username;
+              storedMessage?.from_first_name,
+              storedMessage?.from_last_name,
+            ]) ?? storedMessage?.from_username;
           replyTargetId = repliedMessageId;
         }
       } catch (dbError) {
@@ -901,14 +919,9 @@ bot.command("roast", async (ctx) => {
 
       if (!messageToRoast) {
         const replied = replyToMessage;
-        const repliedText =
-          "text" in replied && typeof replied.text === "string"
-            ? replied.text
-            : "caption" in replied && typeof replied.caption === "string"
-              ? replied.caption
-              : undefined;
-        if (repliedText?.trim()) {
-          messageToRoast = repliedText.trim();
+        const repliedText = getTelegramMessageText(replied)?.trim();
+        if (repliedText) {
+          messageToRoast = repliedText;
           replyTargetId = repliedMessageId;
         }
         if ("from" in replied && replied.from) {

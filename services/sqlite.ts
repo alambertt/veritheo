@@ -1,5 +1,6 @@
 import { Database, Statement } from "bun:sqlite";
 import type { Chat, Message, User } from "grammy/types";
+import { getMessagePlainText } from "./rich-message";
 
 const DATABASE_NAME = "veritheo.sqlite";
 
@@ -319,12 +320,13 @@ function mapUser(user: User | undefined): TelegramRawMessage["from"] {
 }
 
 export function mapToTelegramRawMessage(message: Message): TelegramRawMessage {
-  const text =
-    "text" in message && typeof message.text === "string"
-      ? message.text
-      : "caption" in message && typeof message.caption === "string"
-        ? message.caption
-        : undefined;
+  const text = getMessagePlainText(
+    message as {
+      text?: unknown;
+      caption?: unknown;
+      rich_message?: unknown;
+    },
+  );
   const replyToMessageId =
     "reply_to_message" in message &&
     message.reply_to_message &&
