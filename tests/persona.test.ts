@@ -14,6 +14,9 @@ describe("persona helpers", () => {
     expect(resolvePersona("metodista wesleyana")?.slug).toBe(
       "metodista_wesleyana",
     );
+    expect(resolvePersona("adventista del séptimo día")?.slug).toBe(
+      "adventista",
+    );
     expect(resolvePersona("ARrianismo")?.slug).toBe("arriana");
   });
 
@@ -26,6 +29,7 @@ describe("persona helpers", () => {
 
     expect(help).toContain("Persona activa: Neutral");
     expect(help).toContain("/persona metodista_wesleyana");
+    expect(help).toContain("/persona adventista");
     expect(help).toContain("/persona arriana");
     expect(help).toContain("⚠️ HERÉTICA — Arriana");
     expect(help).toContain("explorar y practicar debates");
@@ -47,7 +51,7 @@ describe("persona helpers", () => {
 
   it("adds a visible header only for active non-neutral personas", () => {
     expect(buildPersonaResponseText("pentecostal", "Respuesta")).toBe(
-      "🎭 Persona pentecostal\nRespuesta",
+      "🎭 Persona pentecostal\n\nRespuesta",
     );
     expect(buildPersonaResponseText("neutral", "Respuesta")).toBe("Respuesta");
   });

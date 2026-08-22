@@ -4,6 +4,7 @@ export type PersonaSlug =
   | "ortodoxa"
   | "reformada"
   | "metodista_wesleyana"
+  | "adventista"
   | "pentecostal"
   | "unitaria"
   | "arriana"
@@ -55,6 +56,18 @@ export const PERSONA_DEFINITIONS: readonly PersonaDefinition[] = [
     label: "Metodista wesleyana",
     description: "defiende la teología metodista wesleyana",
     aliases: ["metodista", "wesleyana", "wesleyano", "metodista wesleyana"],
+    category: "historical",
+  },
+  {
+    slug: "adventista",
+    label: "Adventista",
+    description: "defiende la teología adventista del séptimo día",
+    aliases: [
+      "adventista",
+      "adventismo",
+      "adventista del séptimo día",
+      "adventista del septimo dia",
+    ],
     category: "historical",
   },
   {
@@ -197,5 +210,5 @@ export function buildPersonaResponseText(
   const personaLabel = getPersonaDefinition(personaSlug).label.toLocaleLowerCase(
     "es",
   );
-  return `🎭 Persona ${personaLabel}\n${text}`;
+  return `🎭 Persona ${personaLabel}\n\n${text}`;
 }

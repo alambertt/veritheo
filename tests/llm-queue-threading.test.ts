@@ -89,8 +89,10 @@ describe("LLM queue threaded replies", () => {
     }
 
     expect(draftCalls[0]?.message_thread_id).toBe(9);
-    expect(draftCalls[0]?.text).toBe("🎭 Persona pentecostal\nPartial answer");
-    expect(sendCalls[0]?.text).toBe("🎭 Persona pentecostal\nFinal answer");
+    expect(draftCalls[0]?.text).toBe(
+      "🎭 Persona pentecostal\n\nPartial answer",
+    );
+    expect(sendCalls[0]?.text).toBe("🎭 Persona pentecostal\n\nFinal answer");
     expect(sendCalls[0]?.options.message_thread_id).toBe(9);
     expect(sendCalls[0]?.options.reply_to_message_id).toBe(76);
   });
