@@ -732,23 +732,31 @@ bot.command("help", (ctx) => {
 });
 
 bot.command("persona", (ctx) => {
-  logCommandInvocation(ctx, "/persona");
   if (ctx.chat?.type !== "private") {
     return ctx.reply(MESSAGES.personaPrivateOnly);
   }
 
   const args = getCommandArgs(ctx.message?.text);
+  const messageThreadId = getTelegramMessageThreadId(ctx.message);
   if (!args || args.toLocaleLowerCase("es").trim() === "help") {
-    return ctx.reply(buildPersonaHelpMessage(getChatPersona(database, ctx.chat.id)));
+    return ctx.reply(
+      buildPersonaHelpMessage(
+        getChatPersona(database, ctx.chat.id, messageThreadId),
+      ),
+    );
   }
 
   const normalizedArgs = args.toLocaleLowerCase("es").trim();
   const persona = resolvePersona(normalizedArgs === "reset" ? "neutral" : args);
   if (!persona) {
-    return ctx.reply(buildPersonaHelpMessage(getChatPersona(database, ctx.chat.id)));
+    return ctx.reply(
+      buildPersonaHelpMessage(
+        getChatPersona(database, ctx.chat.id, messageThreadId),
+      ),
+    );
   }
 
-  setChatPersona(database, ctx.chat.id, persona.slug);
+  setChatPersona(database, ctx.chat.id, persona.slug, messageThreadId);
   return ctx.reply(MESSAGES.personaChanged(persona.label));
 });
 

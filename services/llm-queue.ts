@@ -89,7 +89,7 @@ async function processJob(
 
   let text: string | undefined;
   let sources: unknown;
-  const persona = getChatPersona(db, job.chat_id);
+  const persona = getChatPersona(db, job.chat_id, job.message_thread_id);
 
   try {
     const response = await askHandler(

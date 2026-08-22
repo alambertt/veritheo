@@ -315,14 +315,45 @@ describe("sqlite message storage", () => {
     expect(claimed?.message_thread_id).toBe(100);
   });
 
-  it("stores private-chat personas and falls back to neutral", () => {
+  it("stores private-chat personas independently per thread", () => {
     expect(getChatPersona(db, 900)).toBe("neutral");
+    expect(getChatPersona(db, 900, 10)).toBe("neutral");
 
-    setChatPersona(db, 900, "arriana");
-    expect(getChatPersona(db, 900)).toBe("arriana");
-
-    setChatPersona(db, 900, "neutral");
+    setChatPersona(db, 900, "arriana", 10);
     expect(getChatPersona(db, 900)).toBe("neutral");
+    expect(getChatPersona(db, 900, 10)).toBe("arriana");
+    expect(getChatPersona(db, 900, 11)).toBe("neutral");
+
+    setChatPersona(db, 900, "pentecostal");
+    expect(getChatPersona(db, 900)).toBe("pentecostal");
+    expect(getChatPersona(db, 900, 10)).toBe("arriana");
+
+    setChatPersona(db, 900, "neutral", 10);
+    expect(getChatPersona(db, 900)).toBe("pentecostal");
+    expect(getChatPersona(db, 900, 10)).toBe("neutral");
+  });
+
+  it("migrates legacy global personas to the root conversation", () => {
+    const legacyDb = new Database(":memory:");
+    legacyDb.run(`
+      CREATE TABLE chat_personas (
+        chat_id INTEGER PRIMARY KEY,
+        persona TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+    legacyDb.run(
+      `
+        INSERT INTO chat_personas (chat_id, persona, updated_at)
+        VALUES (901, 'adventista', 1)
+      `,
+    );
+
+    setupSchema(legacyDb);
+
+    expect(getChatPersona(legacyDb, 901)).toBe("adventista");
+    expect(getChatPersona(legacyDb, 901, 10)).toBe("neutral");
+    legacyDb.close();
   });
 
   it("returns reply chain messages in chronological order", () => {

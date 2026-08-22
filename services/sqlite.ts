@@ -84,9 +84,11 @@ const CREATE_CHAT_PAUSE_STATES_TABLE = `
 
 const CREATE_CHAT_PERSONAS_TABLE = `
   CREATE TABLE IF NOT EXISTS chat_personas (
-    chat_id INTEGER PRIMARY KEY,
+    chat_id INTEGER NOT NULL,
+    message_thread_id INTEGER NOT NULL DEFAULT 0,
     persona TEXT NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, message_thread_id)
   );
 `;
 
@@ -153,6 +155,31 @@ function ensureColumn(
   }
 }
 
+function migrateChatPersonasToThreadScope(db: Database): void {
+  const columns = db.query("PRAGMA table_info(chat_personas)").all() as Array<{
+    name?: string;
+  }>;
+  if (columns.some((column) => column.name === "message_thread_id")) {
+    return;
+  }
+
+  db.run("ALTER TABLE chat_personas RENAME TO chat_personas_legacy");
+  db.run(CREATE_CHAT_PERSONAS_TABLE);
+  db.run(
+    `
+      INSERT INTO chat_personas (
+        chat_id,
+        message_thread_id,
+        persona,
+        updated_at
+      )
+      SELECT chat_id, 0, persona, updated_at
+      FROM chat_personas_legacy
+    `,
+  );
+  db.run("DROP TABLE chat_personas_legacy");
+}
+
 export function initializeDatabase(readonly = false): Database {
   const db = new Database(DATABASE_NAME, {
     readonly,
@@ -177,6 +204,7 @@ export function setupSchema(db: Database) {
   db.run(CREATE_LLM_JOBS_CHAT_INDEX);
   db.run(CREATE_CHAT_PAUSE_STATES_TABLE);
   db.run(CREATE_CHAT_PERSONAS_TABLE);
+  migrateChatPersonasToThreadScope(db);
   db.run(CREATE_BROADCAST_JOBS_TABLE);
   db.run(CREATE_BROADCAST_JOBS_STATUS_INDEX);
   db.run(CREATE_BROADCAST_DELIVERIES_TABLE);
@@ -974,17 +1002,33 @@ export function isChatPaused(
   return getChatPauseState(db, chatId, now)?.is_active === true;
 }
 
-export function getChatPersona(db: Database, chatId: number): PersonaSlug {
+function getPersonaThreadKey(messageThreadId?: number): number {
+  return typeof messageThreadId === "number" &&
+    Number.isSafeInteger(messageThreadId) &&
+    messageThreadId > 0
+    ? messageThreadId
+    : 0;
+}
+
+export function getChatPersona(
+  db: Database,
+  chatId: number,
+  messageThreadId?: number,
+): PersonaSlug {
   const row = db
     .query(
       `
         SELECT persona
         FROM chat_personas
         WHERE chat_id = $chat_id
+          AND message_thread_id = $message_thread_id
         LIMIT 1
       `,
     )
-    .get({ $chat_id: chatId }) as { persona?: unknown } | null;
+    .get({
+      $chat_id: chatId,
+      $message_thread_id: getPersonaThreadKey(messageThreadId),
+    }) as { persona?: unknown } | null;
 
   return isPersonaSlug(row?.persona) ? row.persona : DEFAULT_PERSONA_SLUG;
 }
@@ -993,24 +1037,39 @@ export function setChatPersona(
   db: Database,
   chatId: number,
   persona: PersonaSlug,
+  messageThreadId?: number,
 ): void {
+  const personaThreadKey = getPersonaThreadKey(messageThreadId);
   if (persona === DEFAULT_PERSONA_SLUG) {
-    db.query("DELETE FROM chat_personas WHERE chat_id = $chat_id").run({
+    db.query(
+      `
+        DELETE FROM chat_personas
+        WHERE chat_id = $chat_id
+          AND message_thread_id = $message_thread_id
+      `,
+    ).run({
       $chat_id: chatId,
+      $message_thread_id: personaThreadKey,
     });
     return;
   }
 
   db.query(
     `
-      INSERT INTO chat_personas (chat_id, persona, updated_at)
-      VALUES ($chat_id, $persona, $updated_at)
-      ON CONFLICT(chat_id) DO UPDATE SET
+      INSERT INTO chat_personas (
+        chat_id,
+        message_thread_id,
+        persona,
+        updated_at
+      )
+      VALUES ($chat_id, $message_thread_id, $persona, $updated_at)
+      ON CONFLICT(chat_id, message_thread_id) DO UPDATE SET
         persona = excluded.persona,
         updated_at = excluded.updated_at
     `,
   ).run({
     $chat_id: chatId,
+    $message_thread_id: personaThreadKey,
     $persona: persona,
     $updated_at: Math.floor(Date.now() / 1000),
   });

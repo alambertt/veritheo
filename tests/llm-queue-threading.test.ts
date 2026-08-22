@@ -79,7 +79,7 @@ describe("LLM queue threaded replies", () => {
       requestMessageId: 76,
       question: "Question",
     });
-    setChatPersona(db, 123, "pentecostal");
+    setChatPersona(db, 123, "pentecostal", 9);
 
     const worker = startLlmQueueWorker(bot as any, db, { pollIntervalMs: 1 });
     try {
