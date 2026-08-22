@@ -41,6 +41,7 @@ import {
   enqueueLlmJob,
   enqueueBroadcastJob,
   getChatPauseState,
+  getChatPersona,
   getBroadcastTargetChats,
   getReplyChainMessages,
   getMessageByChatAndMessageId,
@@ -52,6 +53,7 @@ import {
   mapToTelegramRawMessage,
   resumeChatPause,
   setChatPauseState,
+  setChatPersona,
   storeHeresyCacheEntry,
   storeTelegramMessage,
 } from "./services/sqlite";
@@ -68,6 +70,10 @@ import {
 } from "./services/theology-poll";
 import { SIMILARITY_THRESHOLD } from "./constants";
 import { getMessagePlainText } from "./services/rich-message";
+import {
+  buildPersonaHelpMessage,
+  resolvePersona,
+} from "./services/persona";
 
 config();
 
@@ -727,7 +733,23 @@ bot.command("help", (ctx) => {
 
 bot.command("persona", (ctx) => {
   logCommandInvocation(ctx, "/persona");
-  ctx.reply(MESSAGES.persona);
+  if (ctx.chat?.type !== "private") {
+    return ctx.reply(MESSAGES.personaPrivateOnly);
+  }
+
+  const args = getCommandArgs(ctx.message?.text);
+  if (!args || args.toLocaleLowerCase("es").trim() === "help") {
+    return ctx.reply(buildPersonaHelpMessage(getChatPersona(database, ctx.chat.id)));
+  }
+
+  const normalizedArgs = args.toLocaleLowerCase("es").trim();
+  const persona = resolvePersona(normalizedArgs === "reset" ? "neutral" : args);
+  if (!persona) {
+    return ctx.reply(buildPersonaHelpMessage(getChatPersona(database, ctx.chat.id)));
+  }
+
+  setChatPersona(database, ctx.chat.id, persona.slug);
+  return ctx.reply(MESSAGES.personaChanged(persona.label));
 });
 
 bot.command("verify", async (ctx) => {

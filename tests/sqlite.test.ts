@@ -6,6 +6,7 @@ import {
   countPendingLlmJobsForChat,
   enqueueLlmJob,
   getChatPauseState,
+  getChatPersona,
   getHeresyCacheEntry,
   getMessageByChatAndMessageId,
   getMessagesByChat,
@@ -16,6 +17,7 @@ import {
   queryMessages,
   resumeChatPause,
   setChatPauseState,
+  setChatPersona,
   setupSchema,
   storeHeresyCacheEntry,
   storeTelegramMessage,
@@ -32,6 +34,7 @@ describe("sqlite message storage", () => {
     db.run("DELETE FROM messages");
     db.run("DELETE FROM heresy_cache");
     db.run("DELETE FROM chat_pause_states");
+    db.run("DELETE FROM chat_personas");
     db.run("DELETE FROM llm_jobs");
   });
 
@@ -310,6 +313,16 @@ describe("sqlite message storage", () => {
 
     const claimed = claimNextLlmJob(db);
     expect(claimed?.message_thread_id).toBe(100);
+  });
+
+  it("stores private-chat personas and falls back to neutral", () => {
+    expect(getChatPersona(db, 900)).toBe("neutral");
+
+    setChatPersona(db, 900, "arriana");
+    expect(getChatPersona(db, 900)).toBe("arriana");
+
+    setChatPersona(db, 900, "neutral");
+    expect(getChatPersona(db, 900)).toBe("neutral");
   });
 
   it("returns reply chain messages in chronological order", () => {

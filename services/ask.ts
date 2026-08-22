@@ -2,12 +2,16 @@ import { google } from "@ai-sdk/google";
 import { xai } from "@ai-sdk/xai";
 import type { Tool } from "ai";
 import { GOOGLE_MODEL_LATEST, GROK_MODEL } from "../constants";
-import { initialPrompt } from "../prompts/initial";
+import {
+  initialPrompt,
+  neutralPostureInstruction,
+} from "../prompts/initial";
 import {
   generateTextResponse,
   type PartialTextOptions,
 } from "./generate-text-response";
 import { logTokenUsage } from "./token-usage";
+import { buildPersonaInstruction, type PersonaSlug } from "./persona";
 
 function buildAskMessages(question: string, messagesContext?: string[]) {
   return [
@@ -57,11 +61,15 @@ function isGoogleTransientFailure(error: unknown) {
 export async function askHandler(
   question: string,
   messagesContext?: string[],
-  options?: PartialTextOptions & { route?: string },
+  options?: PartialTextOptions & { route?: string; persona?: PersonaSlug },
 ) {
   const messages = buildAskMessages(question, messagesContext);
   const route =
     options?.route ?? (messagesContext?.length ? "/ask_group" : "/ask");
+  const personaInstruction = buildPersonaInstruction(options?.persona ?? "neutral");
+  const systemPrompt = personaInstruction
+    ? `${initialPrompt.replace(`\n${neutralPostureInstruction}`, "")}${personaInstruction}`
+    : initialPrompt;
 
   try {
     const googleSearchTool = google.tools.googleSearch({}) as Tool<any, any>;
@@ -70,7 +78,7 @@ export async function askHandler(
         {
           model: google(GOOGLE_MODEL_LATEST),
           maxRetries: 0,
-          system: initialPrompt,
+          system: systemPrompt,
           tools: {
             google_search: googleSearchTool,
           },
@@ -114,7 +122,7 @@ export async function askHandler(
       await generateTextResponse(
         {
           model: xai.responses(GROK_MODEL),
-          system: initialPrompt,
+          system: systemPrompt,
           tools: {
             web_search: webSearchTool,
           },

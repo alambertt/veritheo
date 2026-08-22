@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { describe, expect, it, mock } from "bun:test";
 import {
   enqueueLlmJob,
+  setChatPersona,
   setupSchema,
 } from "../services/sqlite";
 
@@ -78,6 +79,7 @@ describe("LLM queue threaded replies", () => {
       requestMessageId: 76,
       question: "Question",
     });
+    setChatPersona(db, 123, "pentecostal");
 
     const worker = startLlmQueueWorker(bot as any, db, { pollIntervalMs: 1 });
     try {
@@ -87,6 +89,8 @@ describe("LLM queue threaded replies", () => {
     }
 
     expect(draftCalls[0]?.message_thread_id).toBe(9);
+    expect(draftCalls[0]?.text).toBe("🎭 Persona pentecostal\nPartial answer");
+    expect(sendCalls[0]?.text).toBe("🎭 Persona pentecostal\nFinal answer");
     expect(sendCalls[0]?.options.message_thread_id).toBe(9);
     expect(sendCalls[0]?.options.reply_to_message_id).toBe(76);
   });

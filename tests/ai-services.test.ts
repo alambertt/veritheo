@@ -70,6 +70,15 @@ describe("AI-backed services", () => {
     expect(result.safetyRatings).toEqual(["safe"]);
   });
 
+  it("adds the active persona instruction to the model system prompt", async () => {
+    await askHandler("Question?", undefined, { persona: "arriana" });
+
+    const lastCall = calls.at(-1) as any;
+    expect(lastCall.system).toContain("PERSONA ACTIVA: Arriana");
+    expect(lastCall.system).toContain("militante");
+    expect(lastCall.system).not.toContain("Eres neutral entre las corrientes");
+  });
+
   it("falls back to grok when google fails with a transient socket error", async () => {
     let invocation = 0;
     generateTextImpl = async (params) => {

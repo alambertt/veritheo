@@ -17,7 +17,7 @@ Comandos disponibles:
 /veritheo_resume - Reanuda a Veritheo en este grupo
 /veritheo_status - Muestra si Veritheo está pausado en este grupo
 /help - Lo que necesitas saber para utilizar este bot
-/persona - Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura
+/persona - Consulta o cambia la postura teológica en el chat privado
 /verify - Responde a un mensaje para verificar su contenido y citar posibles errores
 /roast - Refuta un argumento usando los mejores contraargumentos del espectro teológico contrario
 /my_heresy - Descubre tu herejía histórica según tus mensajes en el grupo
@@ -26,8 +26,10 @@ Comandos disponibles:
 En chat privado también puedes escribirme directamente sin usar /ask.
 Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orientación.
   `.trim(),
-  persona:
-    "Adopta una postura teológica por defecto y el bot responde con argumentos de dicha postura",
+  personaPrivateOnly:
+    "Este comando solo funciona en chats privados con Veritheo.",
+  personaChanged: (label: string) =>
+    `🎭 Persona activa: ${label}. Las próximas respuestas seguirán esta postura.`,
   askMissingQuestion:
     "Por favor, proporciona una pregunta después del comando /ask.",
   askGroupMissingQuestion:

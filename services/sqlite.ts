@@ -1,6 +1,11 @@
 import { Database, Statement } from "bun:sqlite";
 import type { Chat, Message, User } from "grammy/types";
 import { getMessagePlainText } from "./rich-message";
+import {
+  DEFAULT_PERSONA_SLUG,
+  isPersonaSlug,
+  type PersonaSlug,
+} from "./persona";
 
 const DATABASE_NAME = "veritheo.sqlite";
 
@@ -74,6 +79,14 @@ const CREATE_CHAT_PAUSE_STATES_TABLE = `
     reason TEXT,
     paused_by_user_id INTEGER,
     resumed_at INTEGER
+  );
+`;
+
+const CREATE_CHAT_PERSONAS_TABLE = `
+  CREATE TABLE IF NOT EXISTS chat_personas (
+    chat_id INTEGER PRIMARY KEY,
+    persona TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
   );
 `;
 
@@ -163,6 +176,7 @@ export function setupSchema(db: Database) {
   db.run(CREATE_LLM_JOBS_STATUS_INDEX);
   db.run(CREATE_LLM_JOBS_CHAT_INDEX);
   db.run(CREATE_CHAT_PAUSE_STATES_TABLE);
+  db.run(CREATE_CHAT_PERSONAS_TABLE);
   db.run(CREATE_BROADCAST_JOBS_TABLE);
   db.run(CREATE_BROADCAST_JOBS_STATUS_INDEX);
   db.run(CREATE_BROADCAST_DELIVERIES_TABLE);
@@ -958,6 +972,48 @@ export function isChatPaused(
   now = Math.floor(Date.now() / 1000),
 ): boolean {
   return getChatPauseState(db, chatId, now)?.is_active === true;
+}
+
+export function getChatPersona(db: Database, chatId: number): PersonaSlug {
+  const row = db
+    .query(
+      `
+        SELECT persona
+        FROM chat_personas
+        WHERE chat_id = $chat_id
+        LIMIT 1
+      `,
+    )
+    .get({ $chat_id: chatId }) as { persona?: unknown } | null;
+
+  return isPersonaSlug(row?.persona) ? row.persona : DEFAULT_PERSONA_SLUG;
+}
+
+export function setChatPersona(
+  db: Database,
+  chatId: number,
+  persona: PersonaSlug,
+): void {
+  if (persona === DEFAULT_PERSONA_SLUG) {
+    db.query("DELETE FROM chat_personas WHERE chat_id = $chat_id").run({
+      $chat_id: chatId,
+    });
+    return;
+  }
+
+  db.query(
+    `
+      INSERT INTO chat_personas (chat_id, persona, updated_at)
+      VALUES ($chat_id, $persona, $updated_at)
+      ON CONFLICT(chat_id) DO UPDATE SET
+        persona = excluded.persona,
+        updated_at = excluded.updated_at
+    `,
+  ).run({
+    $chat_id: chatId,
+    $persona: persona,
+    $updated_at: Math.floor(Date.now() / 1000),
+  });
 }
 
 export function enqueueLlmJob(

@@ -5,6 +5,7 @@ import { createLlmDraftStreamerForChat } from "./llm-streaming-policy";
 import { buildSourcesMessage } from "./sources";
 import {
   claimNextLlmJob,
+  getChatPersona,
   isChatPaused,
   markLlmJobDone,
   markLlmJobFailed,
@@ -14,6 +15,7 @@ import {
 } from "./sqlite";
 import { sendTelegramText } from "./telegram-send";
 import { verifyMessageContent } from "./verify";
+import { buildPersonaResponseText } from "./persona";
 
 const DEFAULT_MAX_CONCURRENT_JOBS = 3;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -87,6 +89,7 @@ async function processJob(
 
   let text: string | undefined;
   let sources: unknown;
+  const persona = getChatPersona(db, job.chat_id);
 
   try {
     const response = await askHandler(
@@ -94,13 +97,20 @@ async function processJob(
       job.context_messages.length > 0 ? job.context_messages : undefined,
       draftStreamer
         ? {
-            onPartialText: (partialText) => draftStreamer.update(partialText),
+            onPartialText: (partialText) =>
+              draftStreamer.update(buildPersonaResponseText(persona, partialText)),
             route: job.kind === "ask_group" ? "/ask_group" : "/ask",
+            persona,
           }
-        : { route: job.kind === "ask_group" ? "/ask_group" : "/ask" },
+        : {
+            route: job.kind === "ask_group" ? "/ask_group" : "/ask",
+            persona,
+          },
     );
 
-    text = response.text;
+    text = response.text
+      ? buildPersonaResponseText(persona, response.text)
+      : response.text;
     sources = response.sources;
 
     await draftStreamer?.finish(text);
