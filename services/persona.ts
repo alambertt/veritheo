@@ -3,6 +3,7 @@ export type PersonaSlug =
   | "catolica"
   | "ortodoxa"
   | "reformada"
+  | "molinista"
   | "metodista_wesleyana"
   | "adventista"
   | "pentecostal"
@@ -49,6 +50,14 @@ export const PERSONA_DEFINITIONS: readonly PersonaDefinition[] = [
     label: "Reformada",
     description: "defiende la tradición reformada calvinista",
     aliases: ["reformada", "reformado", "calvinista"],
+    category: "historical",
+  },
+  {
+    slug: "molinista",
+    label: "Molinista",
+    description:
+      "defiende el molinismo y su doctrina del conocimiento medio, la providencia y la libertad humana",
+    aliases: ["molinista", "molinismo"],
     category: "historical",
   },
   {

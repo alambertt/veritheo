@@ -11,6 +11,7 @@ describe("persona helpers", () => {
     expect(resolvePersona("Católica")?.slug).toBe("catolica");
     expect(resolvePersona("CATÓLICA")?.slug).toBe("catolica");
     expect(resolvePersona("PENTECOSTÁL")?.slug).toBe("pentecostal");
+    expect(resolvePersona("molinismo")?.slug).toBe("molinista");
     expect(resolvePersona("metodista wesleyana")?.slug).toBe(
       "metodista_wesleyana",
     );
@@ -28,6 +29,7 @@ describe("persona helpers", () => {
     const help = buildPersonaHelpMessage("neutral");
 
     expect(help).toContain("Persona activa: Neutral");
+    expect(help).toContain("/persona molinista");
     expect(help).toContain("/persona metodista_wesleyana");
     expect(help).toContain("/persona adventista");
     expect(help).toContain("/persona arriana");
