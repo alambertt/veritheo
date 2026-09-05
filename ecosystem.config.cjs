@@ -18,6 +18,7 @@ module.exports = {
       // Environment
       env: {
         NODE_ENV: "production",
+        DATABASE_BACKUP_HOUR_UTC: "3",
       },
 
       // Logging

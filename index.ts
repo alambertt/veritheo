@@ -6,6 +6,10 @@ import {
   formatChatLabel,
   formatUserLabel,
 } from "./services/channel-logs";
+import {
+  parseBackupHourUtc,
+  startDatabaseBackupScheduler,
+} from "./services/database-backup";
 import { detectUserHeresy } from "./services/heresy";
 import {
   buildBroadcastAcceptedMessage,
@@ -142,7 +146,10 @@ const HERESY_LOOKBACK_SECONDS = 365 * 24 * 60 * 60;
 const HERESY_MIN_LENGTH = 100;
 const HERESY_MAX_MESSAGES = 20;
 
-const { sendChannelLog, notifyError, logCommandInvocation } =
+const DATABASE_BACKUP_HOUR_UTC = parseBackupHourUtc(
+  process.env.DATABASE_BACKUP_HOUR_UTC,
+);
+const { sendChannelLog, sendChannelDocument, notifyError, logCommandInvocation } =
   createChannelLogger(token, CHANNEL_LOGS_ID);
 
 const isGroupPauseControlChat = (chatType?: string) =>
@@ -1330,6 +1337,11 @@ startLlmQueueWorker(bot, database, {
   onError: notifyError,
 });
 startBroadcastQueueWorker(bot, database, {
+  onError: notifyError,
+});
+startDatabaseBackupScheduler(database, {
+  hourUtc: DATABASE_BACKUP_HOUR_UTC,
+  sendChannelDocument,
   onError: notifyError,
 });
 bot.start();

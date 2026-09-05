@@ -93,4 +93,36 @@ describe("channel log formatting helpers", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("sends channel documents with multipart form data", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; body: FormData }> = [];
+
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ url: String(input), body: init?.body as FormData });
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      const logger = createChannelLogger("token", "123");
+      await logger.sendChannelDocument({
+        filename: "veritheo-2026-09-05.sqlite.gz",
+        bytes: new Uint8Array([1, 2, 3]),
+        caption: "backup",
+        contentType: "application/gzip",
+      });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toContain("/sendDocument");
+      expect(calls[0]?.body.get("chat_id")).toBe("-100123");
+      expect(calls[0]?.body.get("caption")).toBe("backup");
+      const file = calls[0]?.body.get("document") as File;
+      expect(file.name).toBe("veritheo-2026-09-05.sqlite.gz");
+      expect(file.type).toBe("application/gzip");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

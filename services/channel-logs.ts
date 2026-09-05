@@ -74,6 +74,26 @@ type TelegramSuccessResponse = {
   ok: true;
 };
 
+async function throwIfTelegramRequestFailed(response: Response) {
+  if (response.ok) {
+    return;
+  }
+
+  let body: TelegramErrorResponse | TelegramSuccessResponse | undefined;
+  try {
+    body = (await response.json()) as
+      | TelegramErrorResponse
+      | TelegramSuccessResponse;
+  } catch {
+    // ignore parse errors
+  }
+  const description =
+    body && "description" in body && typeof body.description === "string"
+      ? body.description
+      : `HTTP ${response.status}`;
+  throw new Error(`Telegram API error: ${description}`);
+}
+
 async function postToTelegram(
   token: string,
   method: string,
@@ -90,21 +110,23 @@ async function postToTelegram(
     },
   );
 
-  if (!response.ok) {
-    let body: TelegramErrorResponse | TelegramSuccessResponse | undefined;
-    try {
-      body = (await response.json()) as
-        | TelegramErrorResponse
-        | TelegramSuccessResponse;
-    } catch {
-      // ignore parse errors
-    }
-    const description =
-      body && "description" in body && typeof body.description === "string"
-        ? body.description
-        : `HTTP ${response.status}`;
-    throw new Error(`Telegram API error: ${description}`);
-  }
+  await throwIfTelegramRequestFailed(response);
+}
+
+async function postFormToTelegram(
+  token: string,
+  method: string,
+  form: FormData,
+) {
+  const response = await fetch(
+    `${TELEGRAM_API_BASE_URL}/bot${token}/${method}`,
+    {
+      method: "POST",
+      body: form,
+    },
+  );
+
+  await throwIfTelegramRequestFailed(response);
 }
 
 function normalizeChatId(raw: string | number): string | number {
@@ -160,6 +182,13 @@ export function describeUser(ctx: Context): string {
   );
 }
 
+export type ChannelDocument = {
+  filename: string;
+  bytes: Uint8Array;
+  caption?: string;
+  contentType?: string;
+};
+
 export function createChannelLogger(
   botToken?: string,
   channelId?: string | number,
@@ -176,6 +205,33 @@ export function createChannelLogger(
       });
     } catch (logError) {
       console.error("Failed to send log message to channel:", logError);
+    }
+  }
+
+  async function sendChannelDocument(
+    document: ChannelDocument,
+  ): Promise<void> {
+    if (!botToken || !channelId) {
+      return;
+    }
+
+    const form = new FormData();
+    form.set("chat_id", String(normalizeChatId(channelId)));
+    if (document.caption) {
+      form.set("caption", document.caption);
+    }
+    form.set(
+      "document",
+      new File([document.bytes], document.filename, {
+        type: document.contentType ?? "application/octet-stream",
+      }),
+    );
+
+    try {
+      await postFormToTelegram(botToken, "sendDocument", form);
+    } catch (logError) {
+      console.error("Failed to send document to channel:", logError);
+      throw logError;
     }
   }
 
@@ -202,6 +258,7 @@ export function createChannelLogger(
 
   return {
     sendChannelLog,
+    sendChannelDocument,
     notifyError,
     logCommandInvocation,
   };

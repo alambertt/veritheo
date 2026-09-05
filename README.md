@@ -24,6 +24,7 @@ bun install
 
 1. Copia `.env.example` a `.env`
 2. Agrega tu token de bot de Telegram desde [@BotFather](https://t.me/BotFather)
+3. Si configuras `CHANNEL_LOGS_ID`, el bot envía cada día una copia comprimida de `veritheo.sqlite` a ese canal. Usa `DATABASE_BACKUP_HOUR_UTC` para elegir la hora UTC (el valor por defecto es `3`).
 
 ## Ejecución
 
