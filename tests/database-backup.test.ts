@@ -75,7 +75,12 @@ describe("database backup", () => {
     expect(backup.caption).toContain("Date: 2026-09-05");
 
     const restoredPath = `/tmp/veritheo-backup-test-${Date.now()}.sqlite`;
-    Bun.write(restoredPath, Bun.gunzipSync(backup.bytes));
+    const compressedBuffer = new ArrayBuffer(backup.bytes.byteLength);
+    new Uint8Array(compressedBuffer).set(backup.bytes);
+    const restoredBytes = Bun.gunzipSync(compressedBuffer);
+    const restoredBuffer = new ArrayBuffer(restoredBytes.byteLength);
+    new Uint8Array(restoredBuffer).set(restoredBytes);
+    Bun.write(restoredPath, restoredBuffer);
     try {
       const restored = new Database(restoredPath, { readonly: true });
       const row = restored

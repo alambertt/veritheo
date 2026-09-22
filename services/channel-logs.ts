@@ -220,9 +220,11 @@ export function createChannelLogger(
     if (document.caption) {
       form.set("caption", document.caption);
     }
+    const documentBytes = new ArrayBuffer(document.bytes.byteLength);
+    new Uint8Array(documentBytes).set(document.bytes);
     form.set(
       "document",
-      new File([document.bytes], document.filename, {
+      new File([documentBytes], document.filename, {
         type: document.contentType ?? "application/octet-stream",
       }),
     );

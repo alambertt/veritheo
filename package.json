@@ -16,7 +16,8 @@
     "pm2:monit": "pm2 monit"
   },
   "devDependencies": {
-    "@types/bun": "1.3.13"
+    "@types/bun": "1.3.13",
+    "zod": "4.1.12"
   },
   "peerDependencies": {
     "typescript": "6.0.3"
