@@ -1,5 +1,25 @@
 import type { Database } from "bun:sqlite";
+import { choice } from "@typesafe-ai/sdk";
 import { queryMessages } from "./sqlite";
+import {
+  logTypeSafeDecision,
+  runTypeSafeJudgment,
+  TYPESAFE_MIN_CONFIDENCE,
+} from "./typesafe";
+
+const TYPESAFE_CANDIDATE_LIMIT = 20;
+
+type SimilarityResult = {
+  blocked: boolean;
+  similarity: number;
+  matchedMessageId?: number;
+};
+
+type SimilarityCandidate = {
+  messageId: number;
+  text: string;
+  similarity: number;
+};
 
 function normalizeForSimilarity(text: string): string {
   return text
@@ -98,7 +118,7 @@ function diceCoefficient(a: string, b: string): number {
   return (2 * intersection) / (aTotal + bTotal);
 }
 
-export function findSimilarBotMessageInChat(
+function scanSimilarBotMessages(
   db: Database,
   chatId: number,
   promptText: string,
@@ -111,7 +131,7 @@ export function findSimilarBotMessageInChat(
     minPromptTokensForContainment?: number;
     containmentNgramSize?: number;
   } = {},
-): { blocked: boolean; similarity: number; matchedMessageId?: number } {
+): { result: SimilarityResult; candidates: SimilarityCandidate[] } {
   const threshold = options.threshold ?? 0.85;
   const containmentThreshold = options.containmentThreshold ?? threshold;
   const minPromptCharsForSubstring = options.minPromptCharsForSubstring ?? 40;
@@ -122,7 +142,7 @@ export function findSimilarBotMessageInChat(
   const normalizedPrompt = normalizeForSimilarity(promptText);
 
   if (!normalizedPrompt) {
-    return { blocked: false, similarity: 0 };
+    return { result: { blocked: false, similarity: 0 }, candidates: [] };
   }
 
   const promptTokens = normalizedPrompt.split(" ").filter(Boolean);
@@ -132,6 +152,7 @@ export function findSimilarBotMessageInChat(
 
   let bestSimilarity = 0;
   let bestMessageId: number | undefined;
+  const candidates: SimilarityCandidate[] = [];
   let scanned = 0;
   let offset = 0;
 
@@ -163,9 +184,12 @@ export function findSimilarBotMessageInChat(
         normalizedCandidate.includes(normalizedPrompt)
       ) {
         return {
-          blocked: true,
-          similarity: 1,
-          matchedMessageId: message.message_id,
+          result: {
+            blocked: true,
+            similarity: 1,
+            matchedMessageId: message.message_id,
+          },
+          candidates,
         };
       }
 
@@ -177,22 +201,33 @@ export function findSimilarBotMessageInChat(
         );
         if (containment >= containmentThreshold) {
           return {
-            blocked: true,
-            similarity: containment,
-            matchedMessageId: message.message_id,
+            result: {
+              blocked: true,
+              similarity: containment,
+              matchedMessageId: message.message_id,
+            },
+            candidates,
           };
         }
       }
 
       const similarity = diceCoefficient(normalizedPrompt, normalizedCandidate);
+      candidates.push({
+        messageId: message.message_id,
+        text: message.text!,
+        similarity,
+      });
       if (similarity > bestSimilarity) {
         bestSimilarity = similarity;
         bestMessageId = message.message_id;
         if (bestSimilarity >= threshold) {
           return {
-            blocked: true,
-            similarity: bestSimilarity,
-            matchedMessageId: bestMessageId,
+            result: {
+              blocked: true,
+              similarity: bestSimilarity,
+              matchedMessageId: bestMessageId,
+            },
+            candidates,
           };
         }
       }
@@ -202,9 +237,109 @@ export function findSimilarBotMessageInChat(
     offset += botMessages.length;
   }
 
+  candidates.sort((a, b) => b.similarity - a.similarity);
   return {
-    blocked: bestSimilarity >= threshold,
-    similarity: bestSimilarity,
-    matchedMessageId: bestMessageId,
+    result: {
+      blocked: bestSimilarity >= threshold,
+      similarity: bestSimilarity,
+      matchedMessageId: bestMessageId,
+    },
+    candidates: candidates.slice(0, TYPESAFE_CANDIDATE_LIMIT),
+  };
+}
+
+export function findSimilarBotMessageInChat(
+  db: Database,
+  chatId: number,
+  promptText: string,
+  options: {
+    threshold?: number;
+    pageSize?: number;
+    maxMessagesToScan?: number;
+    containmentThreshold?: number;
+    minPromptCharsForSubstring?: number;
+    minPromptTokensForContainment?: number;
+    containmentNgramSize?: number;
+  } = {},
+): SimilarityResult {
+  return scanSimilarBotMessages(db, chatId, promptText, options).result;
+}
+
+export async function findSimilarBotMessageInChatWithJudgment(
+  db: Database,
+  chatId: number,
+  promptText: string,
+  options: {
+    threshold?: number;
+    pageSize?: number;
+    maxMessagesToScan?: number;
+    containmentThreshold?: number;
+    minPromptCharsForSubstring?: number;
+    minPromptTokensForContainment?: number;
+    containmentNgramSize?: number;
+  } = {},
+): Promise<SimilarityResult> {
+  const scan = scanSimilarBotMessages(db, chatId, promptText, options);
+  if (scan.result.blocked || scan.candidates.length === 0) {
+    return scan.result;
+  }
+
+  const criteria: Record<string, string> = {
+    none: "None of these bot messages is the same answer as the user's prompt.",
+  };
+  for (const candidate of scan.candidates) {
+    criteria[String(candidate.messageId)] =
+      "This candidate is a previous bot response. Select it only when it answers the same request, even if the wording differs.";
+  }
+
+  const judgment = await runTypeSafeJudgment(
+    "self-message-guard",
+    {
+      state: {
+        prompt: promptText,
+        candidates: scan.candidates.map((candidate) => ({
+          id: String(candidate.messageId),
+          text: candidate.text,
+        })),
+      },
+      questions: {
+        match: choice(
+          "Which previous bot response, if any, answers the same user request as the prompt? Use none when no candidate is a semantic match.",
+          criteria,
+        ),
+      },
+    },
+    { candidateCount: scan.candidates.length },
+  );
+
+  if (!judgment) {
+    return scan.result;
+  }
+
+  const answer = judgment.answers.match;
+  logTypeSafeDecision("self-message-guard", {
+    decision: answer.choice,
+    confidence: answer.confidence,
+    candidateCount: scan.candidates.length,
+  });
+
+  if (
+    answer.choice === "none" ||
+    answer.confidence < TYPESAFE_MIN_CONFIDENCE
+  ) {
+    return scan.result;
+  }
+
+  const matchedCandidate = scan.candidates.find(
+    (candidate) => String(candidate.messageId) === answer.choice,
+  );
+  if (!matchedCandidate) {
+    return scan.result;
+  }
+
+  return {
+    blocked: true,
+    similarity: matchedCandidate.similarity,
+    matchedMessageId: matchedCandidate.messageId,
   };
 }

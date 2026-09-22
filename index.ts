@@ -10,7 +10,7 @@ import {
   parseBackupHourUtc,
   startDatabaseBackupScheduler,
 } from "./services/database-backup";
-import { detectUserHeresy } from "./services/heresy";
+import { detectUserHeresy, selectHeresyMessages } from "./services/heresy";
 import {
   buildBroadcastAcceptedMessage,
   getBroadcastMessage,
@@ -63,8 +63,9 @@ import {
 } from "./services/sqlite";
 import { getPrivateChatAutoAskQuestion } from "./services/private-chat-auto-ask";
 import { getGroupMentionAutoAskQuestion } from "./services/group-mention-auto-ask";
+import { rankGroupContextMessages } from "./services/group-context-ranking";
 import { getGuestBotQuestion, getGuestQueryId } from "./services/guest-bot";
-import { findSimilarBotMessageInChat } from "./services/self-message-guard";
+import { findSimilarBotMessageInChatWithJudgment } from "./services/self-message-guard";
 import { startTypingIndicator } from "./services/typing-indicator";
 import { buildSourcesMessage } from "./services/sources";
 import { answerTelegramGuestQuery } from "./services/telegram-send";
@@ -578,10 +579,11 @@ bot.command("ask", async (ctx) => {
   }
 });
 
-const buildRecentGroupContextMessages = (
+const buildRecentGroupContextMessages = async (
   chatId: number,
   currentMessageId?: number,
-): string[] | undefined => {
+  question?: string,
+): Promise<string[] | undefined> => {
   const storedMessages = getMessagesByChat(database, chatId, {
     limit: 10,
     order: "desc",
@@ -596,7 +598,15 @@ const buildRecentGroupContextMessages = (
     .map((msg) => msg.text!.trim())
     .reverse();
 
-  return textMessages.length > 0 ? textMessages : undefined;
+  if (textMessages.length === 0) {
+    return undefined;
+  }
+
+  if (!question) {
+    return textMessages;
+  }
+
+  return (await rankGroupContextMessages(question, textMessages)) ?? textMessages;
 };
 
 const buildRecentPrivateContextMessages = (
@@ -638,23 +648,11 @@ bot.command("ask_group", async (ctx) => {
     }
 
     if (chatId) {
-      const storedMessages = getMessagesByChat(database, chatId, {
-        limit: 10,
-        order: "desc",
-      });
-      const textMessages = storedMessages
-        .filter(
-          (msg) =>
-            msg.text &&
-            msg.text.trim() !== "" &&
-            msg.message_id !== ctx.message?.message_id,
-        )
-        .map((msg) => msg.text!.trim())
-        .reverse();
-
-      if (textMessages.length > 0) {
-        contextMessages = textMessages;
-      }
+      contextMessages = await buildRecentGroupContextMessages(
+        chatId,
+        ctx.message?.message_id,
+        question,
+      );
     }
 
     const requestMessageId = ctx.message?.message_id;
@@ -838,7 +836,7 @@ bot.command("verify", async (ctx) => {
       return;
     }
 
-    const botSimilarity = findSimilarBotMessageInChat(
+    const botSimilarity = await findSimilarBotMessageInChatWithJudgment(
       database,
       chatId,
       messageToVerify,
@@ -991,7 +989,7 @@ bot.command("roast", async (ctx) => {
     }
 
     if (chatId) {
-      const botSimilarity = findSimilarBotMessageInChat(
+      const botSimilarity = await findSimilarBotMessageInChatWithJudgment(
         database,
         chatId,
         messageToRoast,
@@ -1171,6 +1169,13 @@ bot.command("my_heresy", async (ctx) => {
       return;
     }
 
+    const selectedMessageTexts = await selectHeresyMessages(messageTexts);
+    const messagesForHeresy = selectedMessageTexts ?? messageTexts;
+    if (messagesForHeresy.length === 0) {
+      await ctx.reply(MESSAGES.heresyInsufficientMaterial);
+      return;
+    }
+
     const stopTyping = startTypingIndicator(ctx);
     const draftStreamer = createContextDraftStreamer(ctx);
     try {
@@ -1178,7 +1183,7 @@ bot.command("my_heresy", async (ctx) => {
         {
           authorName,
           chatTitle: ctx.chat.title,
-          messages: messageTexts,
+          messages: messagesForHeresy,
         },
         draftStreamer
           ? {
@@ -1292,7 +1297,7 @@ bot.on("message", async (ctx) => {
             messageThreadId,
           )
         : jobKind === "ask_group"
-        ? buildRecentGroupContextMessages(chatId, requestMessageId)
+        ? await buildRecentGroupContextMessages(chatId, requestMessageId, question)
         : undefined;
 
     logCommandInvocation(ctx, privateQuestion ? "private_auto_ask" : "group_mention_auto_ask", [

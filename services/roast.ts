@@ -5,6 +5,10 @@ import {
   generateTextResponse,
   type PartialTextOptions,
 } from "./generate-text-response";
+import {
+  buildRoastPolicyInstruction,
+  classifyRoastMessage,
+} from "./roast-preflight";
 import { logTokenUsage } from "./token-usage";
 
 export interface RoastOptions {
@@ -17,6 +21,7 @@ export async function roastMessageContent(
   options: RoastOptions = {},
   streamOptions?: PartialTextOptions,
 ) {
+  const roastRoute = await classifyRoastMessage(message);
   const contextLines: string[] = [];
   if (options.authorName) {
     contextLines.push(`Autor o remitente: ${options.authorName}`);
@@ -27,6 +32,7 @@ export async function roastMessageContent(
 
   const userContent = [
     "Rostiza el argumento usando el espectro teológico contrario y sigue las instrucciones del sistema.",
+    buildRoastPolicyInstruction(roastRoute),
     contextLines.length ? contextLines.join("\n") : null,
     "---",
     message,

@@ -25,6 +25,9 @@ bun install
 1. Copia `.env.example` a `.env`
 2. Agrega tu token de bot de Telegram desde [@BotFather](https://t.me/BotFather)
 3. Si configuras `CHANNEL_LOGS_ID`, el bot envía cada día una copia comprimida de `veritheo.sqlite` a ese canal. Usa `DATABASE_BACKUP_HOUR_UTC` para elegir la hora UTC (el valor por defecto es `3`).
+4. Para activar una integración TypeSafe, crea `TYPESAFE_API_KEY` en la consola de TypeSafe y cambia su flag correspondiente de `off` a `on`. También se acepta `active`. Los flags están apagados por defecto. Si una integración falla, el bot conserva el flujo actual.
+
+Las integraciones disponibles son `TYPESAFE_SELF_MESSAGE_GUARD`, `TYPESAFE_ROAST_PREFLIGHT`, `TYPESAFE_HERESY_SELECTION`, `TYPESAFE_THEOLOGY_POLL_VALIDATION`, `TYPESAFE_VERIFY_CLAIMS` y `TYPESAFE_GROUP_CONTEXT_RANKING`.
 
 ## Ejecución
 

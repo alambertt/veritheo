@@ -1,7 +1,13 @@
+import { noul } from "@typesafe-ai/sdk";
 import { xai } from '@ai-sdk/xai';
 import { THEOLOGY_POLL_GROK_MODEL } from '../constants';
 import { generateTextResponse } from './generate-text-response';
 import { logTokenUsage } from './token-usage';
+import {
+  logTypeSafeDecision,
+  runTypeSafeJudgment,
+  TYPESAFE_MIN_CONFIDENCE,
+} from "./typesafe";
 
 export const TELEGRAM_POLL_QUESTION_LIMIT = 300;
 export const TELEGRAM_POLL_OPTION_LIMIT = 100;
@@ -163,6 +169,57 @@ export function buildFallbackTheologyQuizPoll(topic: string, language: 'en' | 'e
   };
 }
 
+export async function validateTheologyQuizPollSemantics(
+  poll: TheologyQuizPoll,
+  language: 'en' | 'es',
+): Promise<boolean | undefined> {
+  const judgment = await runTypeSafeJudgment("theology-poll-validation", {
+    state: {
+      question: poll.question,
+      options: poll.options,
+      correctOption: poll.options[poll.correctOptionId] ?? "",
+      explanation: poll.explanation,
+      topic: poll.topic,
+    },
+    questions: {
+      oneCorrectAnswer: noul(
+        "Does exactly one option clearly answer the question, without a second option also being correct?",
+      ),
+      explanationSupportsAnswer: noul(
+        "Does the explanation support the selected correct option and match the question?",
+      ),
+      requestedLanguage: noul(
+        language === 'es'
+          ? "Are the question, options, and explanation written in Spanish?"
+          : "Are the question, options, and explanation written in English?",
+      ),
+      theologyPolicy: noul(
+        "Is this a concise, educational, orthodox Christian theology quiz poll without a misleading or hostile premise?",
+      ),
+    },
+  });
+
+  if (!judgment) {
+    return undefined;
+  }
+
+  const answers = judgment.answers;
+  const probabilities = [
+    answers.oneCorrectAnswer.noul,
+    answers.explanationSupportsAnswer.noul,
+    answers.requestedLanguage.noul,
+    answers.theologyPolicy.noul,
+  ];
+  const valid = probabilities.every(
+    (probability) => probability >= TYPESAFE_MIN_CONFIDENCE,
+  );
+  logTypeSafeDecision("theology-poll-validation", {
+    decision: valid ? "valid" : "retry",
+    probability: Math.min(...probabilities),
+  });
+  return valid;
+}
+
 function buildPollGenerationPrompt(topic: string, hasUserPrompt: boolean): string {
   return [
     'Create one native Telegram quiz poll for a theology group.',
@@ -188,7 +245,7 @@ export async function generateTheologyQuizPoll(
   const hasUserPrompt = Boolean(userPrompt);
   const language = detectPromptLanguage(topic, hasUserPrompt);
 
-  try {
+  const generateAttempt = async (): Promise<TheologyQuizPoll> => {
     const { text, usage } = await generateTextResponse({
       model: xai.responses(THEOLOGY_POLL_GROK_MODEL),
       system: 'You generate concise, orthodox Christian theology quiz polls for Telegram. Return only valid JSON.',
@@ -201,6 +258,28 @@ export async function generateTheologyQuizPoll(
     });
     logTokenUsage('/theology_poll', usage);
     return parseTheologyQuizPollJson(text, topic);
+  };
+
+  try {
+    const poll = await generateAttempt();
+    const semanticValidation = await validateTheologyQuizPollSemantics(
+      poll,
+      language,
+    );
+    if (semanticValidation !== false) {
+      return poll;
+    }
+
+    console.warn('TypeSafe rejected the theology poll; retrying once.');
+    const retryPoll = await generateAttempt();
+    const retryValidation = await validateTheologyQuizPollSemantics(
+      retryPoll,
+      language,
+    );
+    if (retryValidation === false) {
+      throw new Error('TypeSafe rejected both theology poll attempts.');
+    }
+    return retryPoll;
   } catch (error) {
     console.warn('Failed to generate a valid theology poll. Falling back to a generic poll:', error);
     return buildFallbackTheologyQuizPoll(topic, language);
