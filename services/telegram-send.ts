@@ -11,6 +11,7 @@ import {
   storeTelegramMessage,
 } from "./sqlite";
 import { buildTelegramFormattedText } from "./telegram-formatting";
+import { redactSecrets } from "./log-redaction";
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 const TELEGRAM_RICH_MESSAGE_LIMIT = 32768;
@@ -68,15 +69,22 @@ async function limitTelegramText(
 }
 
 function describeSendError(error: unknown): string {
+  let description: string;
   if (error instanceof GrammyError) {
-    return error.description;
+    description = error.description;
+  } else if (error instanceof Error) {
+    description = `${error.name}: ${error.message}`;
+  } else if (typeof error === "string") {
+    description = error;
+  } else {
+    try {
+      description = JSON.stringify(error) ?? String(error);
+    } catch {
+      description = String(error);
+    }
   }
 
-  if (error instanceof Error) {
-    return `${error.name}: ${error.message}`;
-  }
-
-  return typeof error === "string" ? error : JSON.stringify(error);
+  return redactSecrets(description);
 }
 
 export async function sendTelegramText(

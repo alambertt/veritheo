@@ -31,6 +31,7 @@ const FEATURE_ENV_NAMES = [
   "TYPESAFE_THEOLOGY_POLL_VALIDATION",
   "TYPESAFE_VERIFY_CLAIMS",
   "TYPESAFE_GROUP_CONTEXT_RANKING",
+  "TYPESAFE_REPLY_ROUTING",
 ] as const;
 
 const originalEnvironment = new Map<string, string | undefined>();

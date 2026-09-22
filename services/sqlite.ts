@@ -53,6 +53,8 @@ const CREATE_LLM_JOBS_TABLE = `
     request_message_id INTEGER NOT NULL,
     question TEXT NOT NULL,
     context_messages_json TEXT,
+    reply_strategy TEXT,
+    reply_model_tier TEXT,
     created_at INTEGER NOT NULL,
     available_at INTEGER NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
@@ -200,6 +202,8 @@ export function setupSchema(db: Database) {
   db.run(CREATE_HERESY_CACHE_INDEX);
   db.run(CREATE_LLM_JOBS_TABLE);
   ensureColumn(db, "llm_jobs", "message_thread_id", "INTEGER");
+  ensureColumn(db, "llm_jobs", "reply_strategy", "TEXT");
+  ensureColumn(db, "llm_jobs", "reply_model_tier", "TEXT");
   db.run(CREATE_LLM_JOBS_STATUS_INDEX);
   db.run(CREATE_LLM_JOBS_CHAT_INDEX);
   db.run(CREATE_CHAT_PAUSE_STATES_TABLE);
@@ -276,6 +280,14 @@ export interface ChatPauseState {
 }
 
 export type LlmJobKind = "ask" | "ask_group" | "verify";
+export type ReplyStrategy =
+  | "playful"
+  | "add_context"
+  | "follow_up"
+  | "disagreement"
+  | "new_topic"
+  | "general";
+export type ReplyModelTier = "fast" | "reasoning";
 export type LlmJobStatus = "pending" | "processing" | "done" | "failed";
 
 export interface LlmJob {
@@ -287,6 +299,8 @@ export interface LlmJob {
   request_message_id: number;
   question: string;
   context_messages: string[];
+  reply_strategy?: ReplyStrategy;
+  reply_model_tier?: ReplyModelTier;
   created_at: number;
   available_at: number;
   attempts: number;
@@ -815,6 +829,11 @@ function mapLlmJobRow(row: any): LlmJob {
     request_message_id: row.request_message_id,
     question: row.question,
     context_messages: contextMessages,
+    reply_strategy: row.reply_strategy ?? undefined,
+    reply_model_tier:
+      row.reply_model_tier === "fast" || row.reply_model_tier === "reasoning"
+        ? row.reply_model_tier
+        : undefined,
     created_at: row.created_at,
     available_at: row.available_at,
     attempts: row.attempts,
@@ -1084,6 +1103,8 @@ export function enqueueLlmJob(
     requestMessageId: number;
     question: string;
     contextMessages?: string[];
+    replyStrategy?: ReplyStrategy;
+    replyModelTier?: ReplyModelTier;
     availableAt?: number;
   },
 ): number {
@@ -1098,6 +1119,8 @@ export function enqueueLlmJob(
         request_message_id,
         question,
         context_messages_json,
+        reply_strategy,
+        reply_model_tier,
         created_at,
         available_at,
         attempts,
@@ -1110,6 +1133,8 @@ export function enqueueLlmJob(
         $request_message_id,
         $question,
         $context_messages_json,
+        $reply_strategy,
+        $reply_model_tier,
         $created_at,
         $available_at,
         0,
@@ -1127,6 +1152,8 @@ export function enqueueLlmJob(
     $context_messages_json: params.contextMessages
       ? JSON.stringify(params.contextMessages)
       : null,
+    $reply_strategy: params.replyStrategy ?? null,
+    $reply_model_tier: params.replyModelTier ?? null,
     $created_at: now,
     $available_at: params.availableAt ?? now,
   });

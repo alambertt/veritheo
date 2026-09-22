@@ -79,6 +79,17 @@ describe("AI-backed services", () => {
     expect(lastCall.system).not.toContain("Eres neutral entre las corrientes");
   });
 
+  it("uses the fast model without search and caps reply output", async () => {
+    await askHandler("It was a joke.", undefined, {
+      replyModelTier: "fast",
+    });
+
+    const lastCall = calls.at(-1) as any;
+    expect(lastCall.model.model).toBe("gemini-3.1-flash-lite");
+    expect(lastCall.tools).toBeUndefined();
+    expect(lastCall.maxOutputTokens).toBe(400);
+  });
+
   it("falls back to grok when google fails with a transient socket error", async () => {
     let invocation = 0;
     generateTextImpl = async (params) => {
@@ -101,7 +112,9 @@ describe("AI-backed services", () => {
       };
     };
 
-    const result = await askHandler("Question?");
+    const result = await askHandler("Question?", undefined, {
+      replyModelTier: "fast",
+    });
 
     expect(result.text).toBe("fallback answer");
     expect(result.sources).toEqual([
@@ -109,6 +122,12 @@ describe("AI-backed services", () => {
     ]);
     expect(invocation).toBe(2);
     expect(calls).toHaveLength(1);
+    expect(calls[0]?.model).toEqual({ model: "grok-4.6", provider: "xai" });
+    expect(calls[0]?.tools).toBeUndefined();
+    expect(calls[0]?.maxOutputTokens).toBe(400);
+    expect(calls[0]?.providerOptions).toEqual({
+      xai: { reasoningEffort: "low" },
+    });
   });
 
   it("falls back to grok when google returns AI_NoOutputGeneratedError", async () => {

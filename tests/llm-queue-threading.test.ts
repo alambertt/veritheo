@@ -6,12 +6,25 @@ import {
   setupSchema,
 } from "../services/sqlite";
 
+const askCallOptions: Array<{
+  responseInstruction?: string;
+  replyModelTier?: string;
+}> = [];
+
 mock.module("../services/ask", () => ({
   askHandler: async (
     _question: string,
     _messagesContext?: string[],
-    options?: { onPartialText?: (text: string) => Promise<void> | void },
+    options?: {
+      onPartialText?: (text: string) => Promise<void> | void;
+      responseInstruction?: string;
+      replyModelTier?: string;
+    },
   ) => {
+    askCallOptions.push({
+      responseInstruction: options?.responseInstruction,
+      replyModelTier: options?.replyModelTier,
+    });
     await options?.onPartialText?.("Partial answer");
     return {
       text: "Final answer",
@@ -38,6 +51,45 @@ async function waitFor(
 }
 
 describe("LLM queue threaded replies", () => {
+  it("passes the selected reply strategy to the answer prompt", async () => {
+    const db = new Database(":memory:");
+    setupSchema(db);
+    const sendCalls: string[] = [];
+    const bot = {
+      api: {
+        raw: { sendMessageDraft: async () => true },
+        sendMessage: async (_chatId: number, text: string) => {
+          sendCalls.push(text);
+          return {
+            message_id: 88,
+            date: 1_700_001_100,
+            chat: { id: 123, type: "group" },
+            text,
+          };
+        },
+      },
+    };
+
+    enqueueLlmJob(db, {
+      kind: "ask_group",
+      chatId: 123,
+      requestMessageId: 87,
+      question: "I think that point is mistaken.",
+      replyStrategy: "disagreement",
+      replyModelTier: "fast",
+    });
+
+    const worker = startLlmQueueWorker(bot as any, db, { pollIntervalMs: 1 });
+    try {
+      await waitFor(() => sendCalls.length > 0);
+    } finally {
+      worker.stop();
+    }
+
+    expect(askCallOptions.at(-1)?.responseInstruction).toContain("Reassess");
+    expect(askCallOptions.at(-1)?.replyModelTier).toBe("fast");
+  });
+
   it("forwards the job thread id to drafts and final replies", async () => {
     const db = new Database(":memory:");
     setupSchema(db);

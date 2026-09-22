@@ -3,6 +3,7 @@ import { xai } from '@ai-sdk/xai';
 import { THEOLOGY_POLL_GROK_MODEL } from '../constants';
 import { generateTextResponse } from './generate-text-response';
 import { logTokenUsage } from './token-usage';
+import { formatErrorForLog } from './log-redaction';
 import {
   logTypeSafeDecision,
   runTypeSafeJudgment,
@@ -281,7 +282,7 @@ export async function generateTheologyQuizPoll(
     }
     return retryPoll;
   } catch (error) {
-    console.warn('Failed to generate a valid theology poll. Falling back to a generic poll:', error);
+    console.warn('Failed to generate a valid theology poll. Falling back to a generic poll:', formatErrorForLog(error));
     return buildFallbackTheologyQuizPoll(topic, language);
   }
 }

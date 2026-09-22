@@ -66,6 +66,11 @@ import { getGroupMentionAutoAskQuestion } from "./services/group-mention-auto-as
 import { rankGroupContextMessages } from "./services/group-context-ranking";
 import { getGuestBotQuestion, getGuestQueryId } from "./services/guest-bot";
 import { findSimilarBotMessageInChatWithJudgment } from "./services/self-message-guard";
+import {
+  buildReplyRoutingState,
+  classifyBotReply,
+  shouldRespondToBotReply,
+} from "./services/reply-routing";
 import { startTypingIndicator } from "./services/typing-indicator";
 import { buildSourcesMessage } from "./services/sources";
 import { answerTelegramGuestQuery } from "./services/telegram-send";
@@ -79,7 +84,9 @@ import {
   buildPersonaHelpMessage,
   resolvePersona,
 } from "./services/persona";
+import { installConsoleRedaction } from "./services/log-redaction";
 
+installConsoleRedaction();
 config();
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -270,11 +277,7 @@ const buildThreadContextEntry = (message: {
     return undefined;
   }
 
-  const authorLabel = message.from_is_bot
-    ? "Veritheo"
-    : (formatDisplayName([message.from_first_name, message.from_last_name]) ??
-      message.from_username ??
-      "Usuario");
+  const authorLabel = message.from_is_bot ? "Veritheo" : "Usuario";
 
   return `${authorLabel}: ${text}`;
 };
@@ -305,7 +308,7 @@ const buildReplyContinuationContext = (
     .map(buildThreadContextEntry)
     .filter((message): message is string => Boolean(message));
 
-  if (history.length > 0 || !fallbackReplyMessage) {
+  if (!fallbackReplyMessage) {
     return history;
   }
 
@@ -314,18 +317,11 @@ const buildReplyContinuationContext = (
     return history;
   }
 
-  return [
-    `${
-      fallbackReplyMessage.from?.is_bot
-        ? "Veritheo"
-        : (formatDisplayName([
-            fallbackReplyMessage.from?.first_name,
-            fallbackReplyMessage.from?.last_name,
-          ]) ??
-          fallbackReplyMessage.from?.username ??
-          "Usuario")
-    }: ${fallbackText}`,
-  ];
+  const fallbackEntry = `${fallbackReplyMessage.from?.is_bot ? "Veritheo" : "Usuario"}: ${fallbackText}`;
+  if (history.at(-1) !== fallbackEntry) {
+    history.push(fallbackEntry);
+  }
+  return history;
 };
 
 bot.use(async (ctx, next) => {
@@ -1254,6 +1250,85 @@ bot.on("message", async (ctx) => {
     const isCommand = isCommandMessage(ctx.message.text, ctx.message.entities);
     const isAnonymousAdminMessage =
       "sender_chat" in ctx.message && ctx.message.sender_chat !== undefined;
+    const replyToMessage = ctx.message.reply_to_message;
+    const chatId = ctx.chat?.id;
+    const isReplyRoutingChat =
+      ctx.chat?.type === "private" || isGroupChatType(ctx.chat?.type);
+    const userCanBeRouted =
+      isReplyRoutingChat &&
+      !isCommand &&
+      !isAnonymousAdminMessage &&
+      ctx.message.from?.is_bot !== true &&
+      !BANNED_USER_IDS.includes(ctx.message.from?.id ?? -1);
+
+    if (
+      userCanBeRouted &&
+      chatId &&
+      replyToMessage &&
+      isReplyToThisBot(replyToMessage, ctx.me.username)
+    ) {
+      const botMessage = getTelegramMessageText(replyToMessage)?.trim();
+      if (botMessage) {
+        const replyChain = getReplyChainMessages(
+          database,
+          chatId,
+          replyToMessage.message_id,
+          { limit: 4 },
+        );
+        const replyContextMessages = buildReplyContinuationContext(
+          replyChain,
+          ctx.message.message_id,
+          replyToMessage,
+        );
+        const classification = await classifyBotReply(
+          buildReplyRoutingState({
+            previousMessages: replyChain.filter(
+              (message) => message.message_id !== replyToMessage.message_id,
+            ),
+            botMessage,
+            userReply: rawMessage.text,
+          }),
+        );
+
+        if (classification) {
+          if (!shouldRespondToBotReply(classification)) {
+            return;
+          }
+
+          const requestMessageId = ctx.message.message_id;
+          const messageThreadId = getTelegramMessageThreadId(ctx.message);
+          const isPrivateChat = ctx.chat?.type === "private";
+          const jobKind = isPrivateChat ? "ask" : "ask_group";
+          enqueueLlmJob(database, {
+            kind: jobKind,
+            chatId,
+            messageThreadId,
+            requestMessageId,
+            question: rawMessage.text.trim(),
+            contextMessages: replyContextMessages,
+            replyStrategy: classification.action,
+            replyModelTier: classification.modelTier,
+          });
+          const pendingJobs = countPendingLlmJobsForChat(
+            database,
+            chatId,
+            isPrivateChat ? messageThreadId ?? null : undefined,
+          );
+          await replyWithLLMMessage(
+            ctx,
+            database,
+            buildQueueReceivedMessage(pendingJobs),
+            {
+              preferMarkdown: false,
+              replyToMessageId: requestMessageId,
+              messageThreadId,
+            },
+          );
+          return;
+        }
+      }
+    }
+
     const privateQuestion = getPrivateChatAutoAskQuestion({
       chatType: ctx.chat?.type,
       text: rawMessage.text,
@@ -1279,7 +1354,6 @@ bot.on("message", async (ctx) => {
       return;
     }
 
-    const chatId = ctx.chat?.id;
     const requestMessageId = ctx.message.message_id;
     const messageThreadId = getTelegramMessageThreadId(ctx.message);
 

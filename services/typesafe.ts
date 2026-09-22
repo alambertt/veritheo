@@ -15,9 +15,10 @@ export type TypeSafeFeature =
   | "heresy-selection"
   | "theology-poll-validation"
   | "verify-claims"
-  | "group-context-ranking";
+  | "group-context-ranking"
+  | "reply-routing";
 
-const FEATURE_ENV_NAMES: Record<TypeSafeFeature, string> = {
+const FEATURE_ENV_NAMES: Record<Exclude<TypeSafeFeature, "reply-routing">, string> = {
   "self-message-guard": "TYPESAFE_SELF_MESSAGE_GUARD",
   "roast-preflight": "TYPESAFE_ROAST_PREFLIGHT",
   "heresy-selection": "TYPESAFE_HERESY_SELECTION",
@@ -36,6 +37,10 @@ let testSystemOne: TypeSafeSystemOne | undefined;
 let missingKeyWarningShown = false;
 
 export function isTypeSafeFeatureActive(feature: TypeSafeFeature): boolean {
+  if (feature === "reply-routing") {
+    return true;
+  }
+
   const value = process.env[FEATURE_ENV_NAMES[feature]]?.trim().toLowerCase();
   return value === "on" || value === "active";
 }
@@ -131,6 +136,7 @@ export function logTypeSafeDecision(
     confidence?: number;
     probability?: number;
     candidateCount?: number;
+    modelTier?: string;
   },
 ): void {
   console.info("[TypeSafe] decision", {
@@ -139,6 +145,7 @@ export function logTypeSafeDecision(
     confidence: details.confidence,
     probability: details.probability,
     candidateCount: details.candidateCount,
+    modelTier: details.modelTier,
   });
 }
 

@@ -16,6 +16,8 @@ import {
 import { sendTelegramText } from "./telegram-send";
 import { verifyMessageContent } from "./verify";
 import { buildPersonaResponseText } from "./persona";
+import { formatErrorForLog } from "./log-redaction";
+import { REPLY_SYSTEM_INSTRUCTIONS } from "./reply-routing";
 
 const DEFAULT_MAX_CONCURRENT_JOBS = 3;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -90,6 +92,9 @@ async function processJob(
   let text: string | undefined;
   let sources: unknown;
   const persona = getChatPersona(db, job.chat_id, job.message_thread_id);
+  const responseInstruction = job.reply_strategy
+    ? REPLY_SYSTEM_INSTRUCTIONS[job.reply_strategy]
+    : undefined;
 
   try {
     const response = await askHandler(
@@ -101,10 +106,14 @@ async function processJob(
               draftStreamer.update(buildPersonaResponseText(persona, partialText)),
             route: job.kind === "ask_group" ? "/ask_group" : "/ask",
             persona,
+            responseInstruction,
+            replyModelTier: job.reply_model_tier,
           }
         : {
             route: job.kind === "ask_group" ? "/ask_group" : "/ask",
             persona,
+            responseInstruction,
+            replyModelTier: job.reply_model_tier,
           },
     );
 
@@ -192,10 +201,7 @@ export function startLlmQueueWorker(
               markLlmJobDone(db, job.id);
             }
           } catch (error) {
-            const details =
-              error instanceof Error
-                ? `${error.name}: ${error.message}`
-                : String(error);
+            const details = formatErrorForLog(error);
             markLlmJobFailed(db, {
               jobId: job.id,
               error: details,

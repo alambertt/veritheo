@@ -1,7 +1,11 @@
 import { google } from "@ai-sdk/google";
 import { xai } from "@ai-sdk/xai";
 import type { Tool } from "ai";
-import { GOOGLE_MODEL_LATEST, GROK_MODEL } from "../constants";
+import {
+  GOOGLE_MODEL_BASIC,
+  GOOGLE_MODEL_LATEST,
+  GROK_REPLY_MODEL,
+} from "../constants";
 import {
   initialPrompt,
   neutralPostureInstruction,
@@ -12,6 +16,8 @@ import {
 } from "./generate-text-response";
 import { logTokenUsage } from "./token-usage";
 import { buildPersonaInstruction, type PersonaSlug } from "./persona";
+import { redactSecrets } from "./log-redaction";
+import type { ReplyModelTier } from "./sqlite";
 
 function buildAskMessages(question: string, messagesContext?: string[]) {
   return [
@@ -61,27 +67,41 @@ function isGoogleTransientFailure(error: unknown) {
 export async function askHandler(
   question: string,
   messagesContext?: string[],
-  options?: PartialTextOptions & { route?: string; persona?: PersonaSlug },
+  options?: PartialTextOptions & {
+    route?: string;
+    persona?: PersonaSlug;
+    responseInstruction?: string;
+    replyModelTier?: ReplyModelTier;
+  },
 ) {
   const messages = buildAskMessages(question, messagesContext);
   const route =
     options?.route ?? (messagesContext?.length ? "/ask_group" : "/ask");
   const personaInstruction = buildPersonaInstruction(options?.persona ?? "neutral");
-  const systemPrompt = personaInstruction
+  const personaPrompt = personaInstruction
     ? `${initialPrompt.replace(`\n${neutralPostureInstruction}`, "")}${personaInstruction}`
     : initialPrompt;
+  const systemPrompt = options?.responseInstruction
+    ? `${personaPrompt}\n\n${options.responseInstruction}`
+    : personaPrompt;
+  const modelTier = options?.replyModelTier ?? "reasoning";
+  const useFastModel = modelTier === "fast";
+  const googleModel = useFastModel ? GOOGLE_MODEL_BASIC : GOOGLE_MODEL_LATEST;
 
   try {
-    const googleSearchTool = google.tools.googleSearch({}) as Tool<any, any>;
+    const googleSearchTool = useFastModel
+      ? undefined
+      : (google.tools.googleSearch({}) as Tool<any, any>);
     const { text, sources, providerMetadata, usage } =
       await generateTextResponse(
         {
-          model: google(GOOGLE_MODEL_LATEST),
+          model: google(googleModel),
           maxRetries: 0,
+          ...(useFastModel ? { maxOutputTokens: 400 } : {}),
           system: systemPrompt,
-          tools: {
-            google_search: googleSearchTool,
-          },
+          ...(googleSearchTool
+            ? { tools: { google_search: googleSearchTool } }
+            : {}),
           providerOptions: {
             google: {
               serviceTier: 'flex',
@@ -93,11 +113,11 @@ export async function askHandler(
         options,
       );
 
-    logTokenUsage(route, usage);
-    console.log("🚀 ~ askHandler ~ providerMetadata:", providerMetadata);
-    console.log("🚀 ~ askHandler ~ sources:", sources);
-    console.log("🚀 ~ askHandler ~ text:", text);
-
+    logTokenUsage(route, usage, {
+      provider: "google",
+      model: googleModel,
+      tier: modelTier,
+    });
     // access the grounding metadata.
     const metadata = (
       providerMetadata as
@@ -114,31 +134,32 @@ export async function askHandler(
 
     console.warn(
       "⚠️ Google ask model failed, falling back to Grok:",
-      error instanceof Error ? error.message : error,
+      redactSecrets(error instanceof Error ? error.message : String(error)),
     );
 
-    const webSearchTool = xai.tools.webSearch({});
+    const webSearchTool = useFastModel ? undefined : xai.tools.webSearch({});
     const { text, sources, providerMetadata, usage } =
       await generateTextResponse(
         {
-          model: xai.responses(GROK_MODEL),
+          model: xai.responses(GROK_REPLY_MODEL),
+          ...(useFastModel ? { maxOutputTokens: 400 } : {}),
           system: systemPrompt,
-          tools: {
-            web_search: webSearchTool,
+          providerOptions: {
+            xai: {
+              reasoningEffort: useFastModel ? "low" : "medium",
+            },
           },
+          ...(webSearchTool ? { tools: { web_search: webSearchTool } } : {}),
           messages,
         },
         options,
       );
 
-    logTokenUsage(`${route}_grok_fallback`, usage);
-    console.log(
-      "🚀 ~ askHandler (grok fallback) ~ providerMetadata:",
-      providerMetadata,
-    );
-    console.log("🚀 ~ askHandler (grok fallback) ~ sources:", sources);
-    console.log("🚀 ~ askHandler (grok fallback) ~ text:", text);
-
+    logTokenUsage(`${route}_grok_fallback`, usage, {
+      provider: "xai",
+      model: GROK_REPLY_MODEL,
+      tier: modelTier,
+    });
     return {
       text,
       sources,

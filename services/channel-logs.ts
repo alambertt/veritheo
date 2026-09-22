@@ -1,4 +1,5 @@
 import type { Context } from "grammy";
+import { formatErrorForLog, redactSecrets } from "./log-redaction";
 
 export type UserLike = {
   id?: number;
@@ -48,18 +49,7 @@ export function formatChatLabel(chat?: ChatLike): string {
 }
 
 export function formatErrorDetails(error: unknown): string {
-  if (error instanceof Error) {
-    const stack = error.stack ? `\nStack:\n${error.stack}` : "";
-    return `${error.name}: ${error.message}${stack}`;
-  }
-  if (typeof error === "string") {
-    return error;
-  }
-  try {
-    return JSON.stringify(error, null, 2);
-  } catch {
-    return String(error);
-  }
+  return formatErrorForLog(error);
 }
 
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
@@ -201,10 +191,10 @@ export function createChannelLogger(
     try {
       await postToTelegram(botToken, "sendMessage", {
         chat_id: normalizeChatId(channelId),
-        text: message,
+        text: redactSecrets(message),
       });
     } catch (logError) {
-      console.error("Failed to send log message to channel:", logError);
+      console.error("Failed to send log message to channel:", formatErrorForLog(logError));
     }
   }
 
@@ -232,7 +222,7 @@ export function createChannelLogger(
     try {
       await postFormToTelegram(botToken, "sendDocument", form);
     } catch (logError) {
-      console.error("Failed to send document to channel:", logError);
+      console.error("Failed to send document to channel:", formatErrorForLog(logError));
       throw logError;
     }
   }

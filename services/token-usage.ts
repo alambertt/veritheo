@@ -4,8 +4,13 @@ interface TokenUsage {
   totalTokens?: number;
 }
 
-export function logTokenUsage(command: string, usage?: TokenUsage) {
+export function logTokenUsage(
+  command: string,
+  usage?: TokenUsage,
+  modelDetails?: { provider: string; model: string; tier: string },
+) {
   console.log(`🧮 ${command} token usage:`, {
+    ...modelDetails,
     inputTokens: usage?.inputTokens ?? null,
     outputTokens: usage?.outputTokens ?? null,
     totalTokens: usage?.totalTokens ?? null,

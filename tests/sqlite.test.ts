@@ -281,6 +281,12 @@ describe("sqlite message storage", () => {
     expect(jobColumns.some((column) => column.name === "message_thread_id")).toBe(
       true,
     );
+    expect(jobColumns.some((column) => column.name === "reply_strategy")).toBe(
+      true,
+    );
+    expect(
+      jobColumns.some((column) => column.name === "reply_model_tier"),
+    ).toBe(true);
   });
 
   it("enqueues, counts, and claims LLM jobs with thread ids", () => {
@@ -313,6 +319,21 @@ describe("sqlite message storage", () => {
 
     const claimed = claimNextLlmJob(db);
     expect(claimed?.message_thread_id).toBe(100);
+  });
+
+  it("persists reply strategies in queued LLM jobs", () => {
+    enqueueLlmJob(db, {
+      kind: "ask_group",
+      chatId: 77,
+      requestMessageId: 10,
+      question: "That was a joke.",
+      replyStrategy: "playful",
+      replyModelTier: "fast",
+    });
+
+    const claimed = claimNextLlmJob(db);
+    expect(claimed?.reply_strategy).toBe("playful");
+    expect(claimed?.reply_model_tier).toBe("fast");
   });
 
   it("stores private-chat personas independently per thread", () => {
