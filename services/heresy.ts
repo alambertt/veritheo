@@ -140,7 +140,9 @@ export async function detectUserHeresy(
           serviceTier: 'flex',
         },
       },
-      timeout: 600000, // 10 minutes for Flex tier
+      // One SDK retry, with a single deadline covering requests and backoff.
+      maxRetries: 1,
+      timeout: { totalMs: 60_000 },
       messages: [{ role: "user", content: userContent }],
     },
     streamOptions,

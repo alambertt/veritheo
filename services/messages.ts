@@ -54,6 +54,8 @@ Simplemente hazme cualquier pregunta teológica y te proporcionaré ideas y orie
     "😇 Este sabio infalible nunca se equivoca, así que no puedo rostizar sus mensajes por respeto a su legendaria sabiduría. ✨",
   modelEmptyResult:
     "No se obtuvo una respuesta válida del modelo. Intenta nuevamente más tarde.",
+  heresyUnavailable:
+    "El modelo está temporalmente ocupado por alta demanda o no respondió a tiempo. No pude completar el análisis. Vuelve a intentar /my_heresy en un minuto.",
   heresyGroupOnly:
     "Este comando está pensado para grupos. Úsalo en un chat grupal respondiendo a un mensaje.",
   heresyReplyRequired:

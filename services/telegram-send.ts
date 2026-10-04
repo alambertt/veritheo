@@ -60,11 +60,19 @@ type GuestQueryApi = {
 async function limitTelegramText(
   text: string,
   limit = TELEGRAM_MESSAGE_LIMIT,
+  allowAISummarization = true,
 ): Promise<string> {
   if (text.length <= limit) {
     return text;
   }
 
+  if (!allowAISummarization) {
+    const notice = "\n\n[Respuesta recortada por el límite de Telegram.]";
+    const end = limit - notice.length;
+    // Avoid splitting a UTF-16 surrogate pair at the cutoff.
+    const cutoff = /[\uD800-\uDBFF]/.test(text[end - 1] ?? "") ? end - 1 : end;
+    return text.slice(0, cutoff) + notice;
+  }
   return summarizeText(text, limit);
 }
 
@@ -98,16 +106,21 @@ export async function sendTelegramText(
     preferMarkdown?: boolean;
     allowSendingWithoutReply?: boolean;
     bypassPause?: boolean;
+    retryOnFormattingErrorOnly?: boolean;
+    allowAISummarization?: boolean;
   },
 ): Promise<Message | undefined> {
   if (!params.bypassPause && isChatPaused(db, params.chatId)) {
     return undefined;
   }
 
-  const limitedText = await limitTelegramText(params.text);
+  const limitedText = await limitTelegramText(
+    params.text, TELEGRAM_MESSAGE_LIMIT, params.allowAISummarization,
+  );
   const limitedRichText = await limitTelegramText(
     params.text,
     TELEGRAM_RICH_MESSAGE_LIMIT,
+    params.allowAISummarization,
   );
   const threadOptions =
     typeof params.messageThreadId === "number"
@@ -209,6 +222,15 @@ export async function sendTelegramText(
           `Skipping message to chat ${params.chatId}: thread ${params.messageThreadId} not found.`,
         );
         return undefined;
+      }
+
+      const formattingRejected =
+        error instanceof GrammyError &&
+        error.error_code === 400 &&
+        /can't parse|cannot parse|entity|entities|rich_message|rich message.*(unsupported|not supported)/i.test(error.description);
+      // Opt-in commands must not resend after ambiguous delivery or storage errors.
+      if (params.retryOnFormattingErrorOnly && !formattingRejected) {
+        throw error;
       }
 
       if (attempt !== attempts.at(-1)) {

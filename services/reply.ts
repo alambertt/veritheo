@@ -13,6 +13,8 @@ export async function replyWithLLMMessage(
     preferMarkdown?: boolean;
     replyToMessageId?: number;
     messageThreadId?: number;
+    retryOnFormattingErrorOnly?: boolean;
+    allowAISummarization?: boolean;
   },
 ) {
   if (!ctx.chat?.id) {
@@ -31,6 +33,8 @@ export async function replyWithLLMMessage(
         : ctx.message?.message_thread_id,
     text,
     preferMarkdown: options?.preferMarkdown,
+    retryOnFormattingErrorOnly: options?.retryOnFormattingErrorOnly,
+    allowAISummarization: options?.allowAISummarization,
     replyToMessageId,
     allowSendingWithoutReply: true,
   });

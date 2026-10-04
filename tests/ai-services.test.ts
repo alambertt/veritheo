@@ -45,6 +45,11 @@ mock.module("@ai-sdk/xai", () => ({
   },
 }));
 
+import { Database } from "bun:sqlite";
+import { GrammyError } from "grammy";
+import { setupSchema, getHeresyCacheEntry } from "../services/sqlite";
+import { createHeresyCommandHandler } from "../services/heresy-command";
+import { MESSAGES } from "../services/messages";
 import { askHandler } from "../services/ask";
 import { detectMessageFallacies } from "../services/fallacy-detector";
 import { detectUserHeresy } from "../services/heresy";
@@ -205,6 +210,15 @@ describe("AI-backed services", () => {
   });
 
   describe("detectUserHeresy", () => {
+    it("bounds saturation retries and the total generation deadline", async () => {
+      await detectUserHeresy({ messages: ["Mensaje de prueba"] });
+      const request = calls.at(-1) as any;
+      expect(request.maxRetries).toBe(1);
+      expect(request.timeout).toEqual({ totalMs: 60_000 });
+      expect(request.providerOptions).toEqual({ google: { serviceTier: "flex" } });
+      expect(request.model.model).toBe("gemini-3.1-pro-preview");
+    });
+
     it("returns the generated text", async () => {
       generatedText = "Eres un arriano moderno";
       const result = await detectUserHeresy({
@@ -258,4 +272,174 @@ describe("AI-backed services", () => {
       expect(content).toContain("- Msg A\n- Msg B\n- Msg C");
     });
   });
+});
+
+
+describe("/my_heresy delivery", () => {
+  function fixture() {
+    const db = new Database(":memory:");
+    setupSchema(db);
+    db.run(`INSERT INTO messages (chat_id, chat_type, message_id, date, from_id, text)
+      VALUES (-100, 'supergroup', 1, ?, 5, ?)`, [Math.floor(Date.now() / 1000), "Una opinión doctrinal. ".repeat(10)]);
+    const replies: string[] = [];
+    const errors: unknown[] = [];
+    const ctx = {
+      chat: { id: -100, type: "supergroup", title: "Test group" },
+      message: { message_id: 10, message_thread_id: 9, reply_to_message: {
+        message_id: 1, from: { id: 5, first_name: "Test", is_bot: false },
+      } },
+      reply: async (text: string) => { replies.push(text); },
+      replyWithChatAction: async () => true,
+      api: { raw: {}, sendChatAction: async () => true, sendMessage: async (chatId: number, text: string, options: any) => {
+        replies.push(text);
+        expect(options.message_thread_id).toBe(9);
+        return { message_id: 50, date: 1, chat: { id: chatId, type: "supergroup" }, text };
+      } },
+    };
+    const handler = createHeresyCommandHandler({ database: db, untouchableUserIds: [],
+      notifyError: async (_label, error) => { errors.push(error); },
+      logCommandInvocation: () => {},
+    });
+    return { db, replies, errors, ctx, handler };
+  }
+
+  beforeEach(() => {
+    calls.length = 0;
+    generatedText = "Resultado completo";
+    generateTextImpl = undefined;
+  });
+
+  it("sends one clear unavailable reply for the reported retry exhaustion and never caches it", async () => {
+    const f = fixture();
+    const cause = Object.assign(new Error("This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."), { statusCode: 503 });
+    const error = Object.assign(new Error("Failed after 3 attempts"), { name: "AI_RetryError", lastError: cause });
+    generateTextImpl = async () => { throw error; };
+    await f.handler(f.ctx as any);
+    expect(f.replies).toHaveLength(1);
+    expect(f.replies[0]).toContain("alta demanda");
+    expect(f.errors).toEqual([error]);
+    expect(getHeresyCacheEntry(f.db, -100, 5)).toBeUndefined();
+    f.db.close();
+  });
+
+  it("sends and caches one complete answer, then serves it without another provider call", async () => {
+    const f = fixture();
+    await f.handler(f.ctx as any);
+    expect(f.replies).toEqual(["Resultado completo"]);
+    expect(getHeresyCacheEntry(f.db, -100, 5)?.response).toBe("Resultado completo");
+    await f.handler(f.ctx as any);
+    expect(calls).toHaveLength(1);
+    expect(f.replies).toEqual(["Resultado completo", "Resultado completo"]);
+    f.db.close();
+  });
+
+  it("does not label credential failures as saturation", async () => {
+    const f = fixture();
+    generateTextImpl = async () => { throw Object.assign(new Error("Invalid key"), { statusCode: 401 }); };
+    await f.handler(f.ctx as any);
+    expect(f.replies).toHaveLength(1);
+    expect(f.replies[0]).not.toContain("alta demanda");
+    expect(getHeresyCacheEntry(f.db, -100, 5)).toBeUndefined();
+    f.db.close();
+  });
+
+  it("reports a deadline failure without caching it", async () => {
+    const f = fixture();
+    generateTextImpl = async () => { throw new DOMException("Deadline exceeded", "TimeoutError"); };
+    await f.handler(f.ctx as any);
+    expect(f.replies).toEqual([MESSAGES.heresyUnavailable]);
+    expect(getHeresyCacheEntry(f.db, -100, 5)).toBeUndefined();
+    f.db.close();
+  });
+
+  it("does not repeat delivery when Telegram acknowledgment is lost", async () => {
+    const f = fixture();
+    f.ctx.api.sendMessage = async (_chatId: number, text: string) => {
+      f.replies.push(text);
+      throw new Error("Socket closed after send");
+    };
+    await f.handler(f.ctx as any);
+    expect(f.replies).toEqual(["Resultado completo"]);
+    expect(getHeresyCacheEntry(f.db, -100, 5)).toBeUndefined();
+    expect(f.errors).toHaveLength(1);
+    f.db.close();
+  });
+
+  it("does not send an error after the successful answer when cache storage fails", async () => {
+    const f = fixture();
+    f.db.run(`CREATE TRIGGER fail_cache BEFORE INSERT ON heresy_cache
+      BEGIN SELECT RAISE(FAIL, 'cache unavailable'); END`);
+    await f.handler(f.ctx as any);
+    expect(f.replies).toEqual(["Resultado completo"]);
+    expect(f.errors).toHaveLength(1);
+    f.db.close();
+  });
+
+  it("sends user feedback before diagnostics and tolerates notification failure", async () => {
+    const f = fixture();
+    const error = Object.assign(new Error("Service unavailable"), { statusCode: 503 });
+    generateTextImpl = async () => { throw error; };
+    const handler = createHeresyCommandHandler({ database: f.db, untouchableUserIds: [],
+      logCommandInvocation: () => {}, notifyError: async () => {
+        expect(f.replies).toEqual([MESSAGES.heresyUnavailable]);
+        throw new Error("Diagnostic channel unavailable");
+      },
+    });
+    await handler(f.ctx as any);
+    expect(f.replies).toEqual([MESSAGES.heresyUnavailable]);
+    f.db.close();
+  });
+
+  it("never caches an empty model result", async () => {
+    const f = fixture();
+    generatedText = "";
+    await f.handler(f.ctx as any);
+    expect(f.replies).toEqual([MESSAGES.modelEmptyResult]);
+    expect(getHeresyCacheEntry(f.db, -100, 5)).toBeUndefined();
+    f.db.close();
+  });
+
+  it("falls back only after Telegram explicitly rejects formatting", async () => {
+    const f = fixture();
+    const send = f.ctx.api.sendMessage;
+    let attempts = 0;
+    f.ctx.api.sendMessage = async (chatId, text, options) => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new GrammyError("Rejected", {
+          ok: false, error_code: 400, description: "Bad Request: can't parse entities",
+        }, "sendMessage", {});
+      }
+      return send(chatId, text, options);
+    };
+    await f.handler(f.ctx as any);
+    expect(attempts).toBe(2);
+    expect(f.replies).toEqual(["Resultado completo"]);
+    expect(f.errors).toHaveLength(0);
+    f.db.close();
+  });
+
+  it("does not resend when recording an already delivered Telegram message fails", async () => {
+    const f = fixture();
+    f.db.run(`CREATE TRIGGER fail_message BEFORE INSERT ON messages
+      BEGIN SELECT RAISE(FAIL, 'message storage unavailable'); END`);
+    await f.handler(f.ctx as any);
+    expect(f.replies).toEqual(["Resultado completo"]);
+    expect(f.errors).toHaveLength(1);
+    expect(getHeresyCacheEntry(f.db, -100, 5)).toBeUndefined();
+    f.db.close();
+  });
+
+  it("does not start an unbounded summarization call for an oversized answer", async () => {
+    const f = fixture();
+    generatedText = "Un análisis completo. ".repeat(400);
+    await f.handler(f.ctx as any);
+    expect(calls).toHaveLength(1);
+    expect(f.replies).toHaveLength(1);
+    expect(f.replies[0]!.length).toBeLessThanOrEqual(4096);
+    expect(f.replies[0]).toContain("Respuesta recortada");
+    expect(getHeresyCacheEntry(f.db, -100, 5)?.response).toBe(generatedText);
+    f.db.close();
+  });
+
 });

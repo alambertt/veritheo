@@ -10,7 +10,7 @@ import {
   parseBackupHourUtc,
   startDatabaseBackupScheduler,
 } from "./services/database-backup";
-import { detectUserHeresy, selectHeresyMessages } from "./services/heresy";
+import { createHeresyCommandHandler } from "./services/heresy-command";
 import {
   buildBroadcastAcceptedMessage,
   getBroadcastMessage,
@@ -50,15 +50,12 @@ import {
   getReplyChainMessages,
   getMessageByChatAndMessageId,
   getMessagesByChat,
-  getHeresyCacheEntry,
-  getUserMessagesForHeresy,
   initializeDatabase,
   isChatPaused,
   mapToTelegramRawMessage,
   resumeChatPause,
   setChatPauseState,
   setChatPersona,
-  storeHeresyCacheEntry,
   storeTelegramMessage,
 } from "./services/sqlite";
 import { getPrivateChatAutoAskQuestion } from "./services/private-chat-auto-ask";
@@ -148,11 +145,6 @@ const BANNED_USER_IDS = Array.from(
   ]),
 );
 const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ?? undefined;
-
-const HERESY_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
-const HERESY_LOOKBACK_SECONDS = 365 * 24 * 60 * 60;
-const HERESY_MIN_LENGTH = 100;
-const HERESY_MAX_MESSAGES = 20;
 
 const DATABASE_BACKUP_HOUR_UTC = parseBackupHourUtc(
   process.env.DATABASE_BACKUP_HOUR_UTC,
@@ -1055,172 +1047,12 @@ bot.command("roast", async (ctx) => {
   }
 });
 
-bot.command("my_heresy", async (ctx) => {
-  try {
-    const replyToMessage = ctx.message?.reply_to_message;
-    const chatId = ctx.chat?.id;
-    const chatType = ctx.chat?.type;
-    const replyToId = replyToMessage?.message_id;
-
-    logCommandInvocation(ctx, "/my_heresy", [
-      `ReplyToMessageId: ${replyToId ?? "none"}`,
-    ]);
-
-    if (!chatId || !chatType || chatType === "private") {
-      await ctx.reply(MESSAGES.heresyGroupOnly);
-      return;
-    }
-
-    if (!replyToMessage) {
-      await ctx.reply(MESSAGES.heresyReplyRequired);
-      return;
-    }
-
-    if (replyToMessage.from?.is_bot) {
-      await ctx.reply(MESSAGES.heresyBotBlocked);
-      return;
-    }
-
-    let authorId: number | undefined;
-    let authorName: string | undefined;
-
-    try {
-      const storedMessage = getMessageByChatAndMessageId(
-        database,
-        chatId,
-        replyToId ?? 0,
-      );
-      if (storedMessage) {
-        authorId = storedMessage.from_id ?? undefined;
-        authorName =
-          formatDisplayName([
-            storedMessage.from_first_name,
-            storedMessage.from_last_name,
-          ]) ??
-          storedMessage.from_username ??
-          undefined;
-      }
-    } catch (dbError) {
-      console.error(
-        "Failed to retrieve message from database for /my_heresy:",
-        dbError,
-      );
-      await notifyError(
-        "Failed to retrieve message from database for /my_heresy command",
-        dbError,
-      );
-    }
-
-    if (!authorId && replyToMessage.from) {
-      authorId = replyToMessage.from.id;
-      authorName =
-        authorName ??
-        formatDisplayName([
-          replyToMessage.from.first_name,
-          replyToMessage.from.last_name,
-        ]) ??
-        replyToMessage.from.username ??
-        undefined;
-    }
-
-    if (!authorId) {
-      await ctx.reply(MESSAGES.heresyUserMissing);
-      return;
-    }
-
-    if (UNTOUCHABLE_USER_IDS.includes(authorId)) {
-      await ctx.reply(MESSAGES.heresyUntouchable);
-      return;
-    }
-
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    const cached = getHeresyCacheEntry(database, chatId, authorId);
-    if (cached && nowSeconds - cached.created_at < HERESY_CACHE_TTL_SECONDS) {
-      await replyWithLLMMessage(ctx, database, cached.response, {
-        replyToMessageId: replyToId,
-      });
-      return;
-    }
-
-    const sinceDate = nowSeconds - HERESY_LOOKBACK_SECONDS;
-    const recentMessages = getUserMessagesForHeresy(
-      database,
-      chatId,
-      authorId,
-      sinceDate,
-      {
-        limit: HERESY_MAX_MESSAGES,
-        minLength: HERESY_MIN_LENGTH,
-      },
-    );
-
-    const messageTexts = recentMessages
-      .map((message) => message.text?.trim())
-      .filter((text): text is string =>
-        Boolean(text && text.length > HERESY_MIN_LENGTH),
-      );
-
-    if (messageTexts.length === 0) {
-      await ctx.reply(MESSAGES.heresyInsufficientMaterial);
-      return;
-    }
-
-    const selectedMessageTexts = await selectHeresyMessages(messageTexts);
-    const messagesForHeresy = selectedMessageTexts ?? messageTexts;
-    if (messagesForHeresy.length === 0) {
-      await ctx.reply(MESSAGES.heresyInsufficientMaterial);
-      return;
-    }
-
-    const stopTyping = startTypingIndicator(ctx);
-    const draftStreamer = createContextDraftStreamer(ctx);
-    try {
-      const { text } = await detectUserHeresy(
-        {
-          authorName,
-          chatTitle: ctx.chat.title,
-          messages: messagesForHeresy,
-        },
-        draftStreamer
-          ? {
-              onPartialText: (partialText) => draftStreamer.update(partialText),
-            }
-          : undefined,
-      );
-
-      await draftStreamer?.finish(text);
-
-      if (text) {
-        await replyWithLLMMessage(ctx, database, text, {
-          replyToMessageId: replyToId,
-        });
-        storeHeresyCacheEntry(database, {
-          chat_id: chatId,
-          user_id: authorId,
-          created_at: nowSeconds,
-          response: text,
-        });
-      } else {
-        await ctx.reply(MESSAGES.modelEmptyResult);
-      }
-    } finally {
-      draftStreamer?.abort();
-      stopTyping();
-    }
-  } catch (error) {
-    console.error("Failed to process /my_heresy command:", error);
-    await notifyError(
-      `Failed to process /my_heresy command (chatId=${ctx.chat?.id ?? "unknown"})`,
-      error,
-    );
-    try {
-      await replyWithLLMMessage(ctx, database, GENERIC_ERROR_MESSAGE);
-    } catch (replyError) {
-      console.error("Failed to send /my_heresy error message:", replyError);
-      await notifyError("Failed to send /my_heresy error message", replyError);
-    }
-  }
-});
+bot.command("my_heresy", createHeresyCommandHandler({
+  database,
+  untouchableUserIds: UNTOUCHABLE_USER_IDS,
+  notifyError,
+  logCommandInvocation,
+}));
 
 bot.command("ping", (ctx) => {
   logCommandInvocation(ctx, "/ping");
