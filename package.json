@@ -23,7 +23,7 @@
     "typescript": "6.0.3"
   },
   "dependencies": {
-    "@ai-sdk/google": "3.0.68",
+    "@ai-sdk/google": "3.0.133",
     "@ai-sdk/xai": "3.0.88",
     "@typesafe-ai/sdk": "0.6.0",
     "ai": "6.0.175",

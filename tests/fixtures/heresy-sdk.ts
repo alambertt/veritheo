@@ -90,3 +90,13 @@ describe("real SDK /my_heresy retry policy with mocked HTTP", () => {
     expect(requests[0]?.signal?.reason.name).toBe("TimeoutError");
   });
 });
+
+// Exercise the installed provider without the service tests' module mocks.
+it("sends Google Search for Argon without unsupported-tool warnings", async () => {
+  const result = await provider("gemini-4-argon").doGenerate({
+    prompt: [{ role: "user", content: [{ type: "text", text: "Find a source." }] }],
+    tools: [{ type: "provider", id: "google.google_search", name: "google_search", args: {} }],
+  });
+  expect(JSON.parse(requests[0]!.body as string).tools).toEqual([{ googleSearch: {} }]);
+  expect(result.warnings).toEqual([]);
+});

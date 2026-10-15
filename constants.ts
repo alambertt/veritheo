@@ -1,6 +1,6 @@
-export const GOOGLE_MODEL_BASIC = 'gemini-3.1-flash-lite';
-export const GOOGLE_MODEL_PRO = "gemini-3.1-pro-preview";
-export const GOOGLE_MODEL_LATEST = "gemini-3.1-pro-preview";
+export const GOOGLE_MODEL_BASIC = 'gemini-3.8-flash';
+export const GOOGLE_MODEL_PRO = "gemini-4-argon";
+export const GOOGLE_MODEL_LATEST = "gemini-4-argon";
 export const SIMILARITY_THRESHOLD = 0.91;
 
 export const GROK_MODEL = "grok-4.6";

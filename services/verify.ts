@@ -1,7 +1,7 @@
-// import { google } from '@ai-sdk/google';
+import { google } from "@ai-sdk/google";
+import type { Tool } from "ai";
 import { noul, score, type Questions } from "@typesafe-ai/sdk";
-import { xai } from "@ai-sdk/xai";
-import { GROK_MODEL } from "../constants";
+import { GOOGLE_MODEL_LATEST } from "../constants";
 import { verifyPrompt } from "../prompts/verify";
 import {
   generateTextResponse,
@@ -14,7 +14,6 @@ import {
   TYPESAFE_MIN_CONFIDENCE,
 } from "./typesafe";
 
-const VERIFY_REASONING_EFFORT = "medium" as const;
 export const VERIFY_CLAIM_LIMIT = 12;
 
 type VerifyClaimAnswer = {
@@ -130,7 +129,7 @@ export async function verifyMessageContent(
         "\n",
       )
     : message;
-  const webSearchTool = xai.tools.webSearch({});
+  const webSearchTool = google.tools.googleSearch({}) as Tool<any, any>;
   const contextLines: string[] = [];
   if (options.authorName) {
     contextLines.push(`Autor o remitente: ${options.authorName}`);
@@ -151,16 +150,18 @@ export async function verifyMessageContent(
 
   const { text, usage } = await generateTextResponse(
     {
-      model: xai.responses(GROK_MODEL),
+      model: google(GOOGLE_MODEL_LATEST),
       system: verifyPrompt,
       tools: {
-        web_search: webSearchTool,
+        google_search: webSearchTool,
       },
       providerOptions: {
-        xai: {
-          reasoningEffort: VERIFY_REASONING_EFFORT,
+        google: {
+          serviceTier: "flex",
+          thinkingConfig: { thinkingLevel: "medium" },
         },
       },
+      timeout: 600000, // 10 minutes for Flex tier
       messages: [{ role: "user", content: userContent }],
     },
     streamOptions,

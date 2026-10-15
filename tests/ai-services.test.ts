@@ -67,6 +67,7 @@ describe("AI-backed services", () => {
   it("returns ask handler results with metadata", async () => {
     const result = await askHandler("Question?", ["Context"]);
 
+    expect((calls.at(-1) as any).model.model).toBe("gemini-4-argon");
     expect(result.text).toBe("mocked text result");
     expect(result.sources).toEqual([
       { sourceType: "url", url: "https://example.com" },
@@ -90,7 +91,7 @@ describe("AI-backed services", () => {
     });
 
     const lastCall = calls.at(-1) as any;
-    expect(lastCall.model.model).toBe("gemini-3.1-flash-lite");
+    expect(lastCall.model.model).toBe("gemini-3.8-flash");
     expect(lastCall.tools).toBeUndefined();
     expect(lastCall.maxOutputTokens).toBe(400);
   });
@@ -174,6 +175,11 @@ describe("AI-backed services", () => {
     expect(messageContent).toContain("Autor o remitente: Ada");
     expect(messageContent).toContain("Conversación: Grupo");
     expect(messageContent).toContain("Hola");
+    expect(lastCall.model.model).toBe("gemini-4-argon");
+    expect(lastCall.tools).toEqual({ google_search: "mock-search-tool" });
+    expect(lastCall.providerOptions).toEqual({
+      google: { serviceTier: "flex", thinkingConfig: { thinkingLevel: "medium" } },
+    });
   });
 
   it("builds fallacy prompt with context", async () => {
@@ -183,6 +189,8 @@ describe("AI-backed services", () => {
 
     expect(messageContent).toContain("Autor o remitente: Ada");
     expect(messageContent).toContain("Texto");
+    expect(lastCall.model.model).toBe("gemini-3.8-flash");
+    expect(lastCall.providerOptions).toEqual({ google: { serviceTier: "flex" } });
   });
 
   it("builds roast prompt with context", async () => {
@@ -216,7 +224,7 @@ describe("AI-backed services", () => {
       expect(request.maxRetries).toBe(1);
       expect(request.timeout).toEqual({ totalMs: 60_000 });
       expect(request.providerOptions).toEqual({ google: { serviceTier: "flex" } });
-      expect(request.model.model).toBe("gemini-3.1-pro-preview");
+      expect(request.model.model).toBe("gemini-4-argon");
     });
 
     it("returns the generated text", async () => {

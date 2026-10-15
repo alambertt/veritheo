@@ -1,6 +1,5 @@
-// import { google } from '@ai-sdk/google';
-import { zhipu } from "zhipu-ai-provider";
-import { ZHIPU_MODEL } from "../constants";
+import { google } from "@ai-sdk/google";
+import { GOOGLE_MODEL_BASIC } from "../constants";
 import { fallacyDetectorPrompt } from "../prompts/fallacy-detector";
 import {
   generateTextResponse,
@@ -38,9 +37,10 @@ export async function detectMessageFallacies(
 
   const { text, usage } = await generateTextResponse(
     {
-      // model: google(GOOGLE_MODEL_BASIC),
-      model: zhipu(ZHIPU_MODEL),
+      model: google(GOOGLE_MODEL_BASIC),
       system: fallacyDetectorPrompt,
+      providerOptions: { google: { serviceTier: "flex" } },
+      timeout: 600000, // 10 minutes for Flex tier
       messages: [{ role: "user", content: userContent }],
     },
     streamOptions,
