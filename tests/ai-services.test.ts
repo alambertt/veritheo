@@ -68,6 +68,7 @@ describe("AI-backed services", () => {
     const result = await askHandler("Question?", ["Context"]);
 
     expect((calls.at(-1) as any).model.model).toBe("gemini-4-argon");
+    expect((calls.at(-1) as any).providerOptions.google.serviceTier).toBe("standard");
     expect(result.text).toBe("mocked text result");
     expect(result.sources).toEqual([
       { sourceType: "url", url: "https://example.com" },
@@ -92,6 +93,7 @@ describe("AI-backed services", () => {
 
     const lastCall = calls.at(-1) as any;
     expect(lastCall.model.model).toBe("gemini-3.8-flash");
+    expect(lastCall.providerOptions.google.serviceTier).toBe("standard");
     expect(lastCall.tools).toBeUndefined();
     expect(lastCall.maxOutputTokens).toBe(400);
   });
@@ -178,7 +180,7 @@ describe("AI-backed services", () => {
     expect(lastCall.model.model).toBe("gemini-4-argon");
     expect(lastCall.tools).toEqual({ google_search: "mock-search-tool" });
     expect(lastCall.providerOptions).toEqual({
-      google: { serviceTier: "flex", thinkingConfig: { thinkingLevel: "medium" } },
+      google: { serviceTier: "standard", thinkingConfig: { thinkingLevel: "medium" } },
     });
   });
 

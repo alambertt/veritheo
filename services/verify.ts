@@ -157,11 +157,11 @@ export async function verifyMessageContent(
       },
       providerOptions: {
         google: {
-          serviceTier: "flex",
+          serviceTier: "standard",
           thinkingConfig: { thinkingLevel: "medium" },
         },
       },
-      timeout: 600000, // 10 minutes for Flex tier
+      timeout: 600000, // 10-minute request deadline
       messages: [{ role: "user", content: userContent }],
     },
     streamOptions,

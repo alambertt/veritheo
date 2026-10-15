@@ -104,10 +104,10 @@ export async function askHandler(
             : {}),
           providerOptions: {
             google: {
-              serviceTier: 'flex',
+              serviceTier: "standard",
             },
           },
-          timeout: 600000, // 10 minutes for Flex tier
+          timeout: 600000, // 10-minute request deadline
           messages,
         },
         options,
