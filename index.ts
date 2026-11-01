@@ -39,7 +39,9 @@ import {
   shouldBlockActivityWhilePaused,
 } from "./services/chat-pause";
 import { verifyMessageContent } from "./services/verify";
+import { isSpamMessage } from "./services/spam-guard";
 import {
+  banUser,
   buildTelegramMessageRecord,
   countPendingLlmJobsForChat,
   enqueueLlmJob,
@@ -52,6 +54,7 @@ import {
   getMessagesByChat,
   initializeDatabase,
   isChatPaused,
+  listBannedUserIds,
   mapToTelegramRawMessage,
   resumeChatPause,
   setChatPauseState,
@@ -142,6 +145,7 @@ const BANNED_USER_IDS = Array.from(
   new Set([
     ...parseUserIdListEnv("BANNED_USER_IDS"),
     ...(configuredBannedUserId ? [configuredBannedUserId] : []),
+    ...listBannedUserIds(database),
   ]),
 );
 const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ?? undefined;
@@ -1074,6 +1078,30 @@ bot.on("message", async (ctx) => {
 
     const record = buildTelegramMessageRecord(rawMessage);
     storeTelegramMessage(database, record);
+
+    const senderId = ctx.message.from?.id;
+    // ponytail: checks private chats only, where the ad spam arrives. Add group mentions if spam starts there.
+    if (
+      ctx.chat?.type === "private" &&
+      senderId &&
+      ctx.message.from?.is_bot !== true &&
+      !BANNED_USER_IDS.includes(senderId) &&
+      !UNTOUCHABLE_USER_IDS.includes(senderId) &&
+      !isCommandMessage(ctx.message.text, ctx.message.entities) &&
+      (await isSpamMessage(rawMessage.text))
+    ) {
+      banUser(database, senderId, "auto: spam");
+      BANNED_USER_IDS.push(senderId);
+      void sendChannelLog(
+        [
+          "🚫 User auto-banned for spam",
+          `User: ${formatUserLabel(ctx.message.from)}`,
+          `MessageId: ${ctx.message.message_id}`,
+          `Text: ${rawMessage.text.slice(0, 300)}`,
+        ].join("\n"),
+      );
+      return;
+    }
 
     if (ctx.chat?.id && isGroupChatType(ctx.chat.type) && isChatPaused(database, ctx.chat.id)) {
       return;

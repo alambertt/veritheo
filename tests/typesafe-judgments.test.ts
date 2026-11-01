@@ -22,7 +22,8 @@ import {
   type TheologyQuizPoll,
 } from "../services/theology-poll";
 import { rankGroupContextMessages } from "../services/group-context-ranking";
-import { setupSchema } from "../services/sqlite";
+import { banUser, listBannedUserIds, setupSchema } from "../services/sqlite";
+import { isSpamMessage } from "../services/spam-guard";
 
 const FEATURE_ENV_NAMES = [
   "TYPESAFE_SELF_MESSAGE_GUARD",
@@ -32,6 +33,7 @@ const FEATURE_ENV_NAMES = [
   "TYPESAFE_VERIFY_CLAIMS",
   "TYPESAFE_GROUP_CONTEXT_RANKING",
   "TYPESAFE_REPLY_ROUTING",
+  "TYPESAFE_SPAM_GUARD",
 ] as const;
 
 const originalEnvironment = new Map<string, string | undefined>();
@@ -121,6 +123,21 @@ describe("TypeSafe judgment integrations", () => {
 
     expect(result.blocked).toBe(true);
     expect(result.matchedMessageId).toBe(42);
+  });
+
+  it("flags spam only above the ban threshold and persists bans", async () => {
+    activate("TYPESAFE_SPAM_GUARD");
+    setTypeSafeSystemOneForTests(mockJudgment({ spam: { type: "noul", noul: 0.99 } }));
+    expect(await isSpamMessage("💥 现在购买广告，锁定低价！")).toBe(true);
+
+    setTypeSafeSystemOneForTests(mockJudgment({ spam: { type: "noul", noul: 0.9 } }));
+    expect(await isSpamMessage("¿Qué es la gracia?")).toBe(false);
+
+    const db = new Database(":memory:");
+    setupSchema(db);
+    banUser(db, 5755866818, "auto: spam");
+    banUser(db, 5755866818, "auto: spam");
+    expect(listBannedUserIds(db)).toEqual([5755866818]);
   });
 
   it("routes roast preflight decisions without generating replacement text", async () => {

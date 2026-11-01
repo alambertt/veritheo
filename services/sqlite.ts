@@ -140,6 +140,14 @@ const CREATE_BROADCAST_DELIVERIES_JOB_STATUS_INDEX = `
     ON broadcast_deliveries (job_id, status, id);
 `;
 
+const CREATE_BANNED_USERS_TABLE = `
+  CREATE TABLE IF NOT EXISTS banned_users (
+    user_id INTEGER PRIMARY KEY,
+    reason TEXT,
+    banned_at INTEGER NOT NULL
+  );
+`;
+
 const insertMessageStatements = new WeakMap<Database, Statement>();
 
 function ensureColumn(
@@ -213,6 +221,7 @@ export function setupSchema(db: Database) {
   db.run(CREATE_BROADCAST_JOBS_STATUS_INDEX);
   db.run(CREATE_BROADCAST_DELIVERIES_TABLE);
   db.run(CREATE_BROADCAST_DELIVERIES_JOB_STATUS_INDEX);
+  db.run(CREATE_BANNED_USERS_TABLE);
 }
 
 export type TelegramRawMessage = {
@@ -1777,4 +1786,20 @@ export function markBroadcastJobFailed(
   failed_count: number;
 } {
   return syncBroadcastJobCounts(db, jobId, "failed", error);
+}
+
+export function banUser(db: Database, userId: number, reason?: string): void {
+  db.query(
+    `INSERT OR IGNORE INTO banned_users (user_id, reason, banned_at)
+     VALUES ($user_id, $reason, $banned_at)`,
+  ).run({
+    $user_id: userId,
+    $reason: reason ?? null,
+    $banned_at: Math.floor(Date.now() / 1000),
+  });
+}
+
+export function listBannedUserIds(db: Database): number[] {
+  return (db.query("SELECT user_id FROM banned_users").all() as Array<{ user_id: number }>)
+    .map((row) => row.user_id);
 }

@@ -16,7 +16,8 @@ export type TypeSafeFeature =
   | "theology-poll-validation"
   | "verify-claims"
   | "group-context-ranking"
-  | "reply-routing";
+  | "reply-routing"
+  | "spam-guard";
 
 const FEATURE_ENV_NAMES: Record<Exclude<TypeSafeFeature, "reply-routing">, string> = {
   "self-message-guard": "TYPESAFE_SELF_MESSAGE_GUARD",
@@ -25,6 +26,7 @@ const FEATURE_ENV_NAMES: Record<Exclude<TypeSafeFeature, "reply-routing">, strin
   "theology-poll-validation": "TYPESAFE_THEOLOGY_POLL_VALIDATION",
   "verify-claims": "TYPESAFE_VERIFY_CLAIMS",
   "group-context-ranking": "TYPESAFE_GROUP_CONTEXT_RANKING",
+  "spam-guard": "TYPESAFE_SPAM_GUARD",
 };
 
 export type TypeSafeSystemOne = <Q extends Questions>(
