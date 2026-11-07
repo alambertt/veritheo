@@ -17,7 +17,8 @@ export type TypeSafeFeature =
   | "verify-claims"
   | "group-context-ranking"
   | "reply-routing"
-  | "spam-guard";
+  | "spam-guard"
+  | "prompt-injection-guard";
 
 const FEATURE_ENV_NAMES: Record<Exclude<TypeSafeFeature, "reply-routing">, string> = {
   "self-message-guard": "TYPESAFE_SELF_MESSAGE_GUARD",
@@ -27,6 +28,7 @@ const FEATURE_ENV_NAMES: Record<Exclude<TypeSafeFeature, "reply-routing">, strin
   "verify-claims": "TYPESAFE_VERIFY_CLAIMS",
   "group-context-ranking": "TYPESAFE_GROUP_CONTEXT_RANKING",
   "spam-guard": "TYPESAFE_SPAM_GUARD",
+  "prompt-injection-guard": "TYPESAFE_PROMPT_INJECTION_GUARD",
 };
 
 export type TypeSafeSystemOne = <Q extends Questions>(
