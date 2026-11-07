@@ -39,7 +39,7 @@ import {
   shouldBlockActivityWhilePaused,
 } from "./services/chat-pause";
 import { verifyMessageContent } from "./services/verify";
-import { isSpamMessage } from "./services/spam-guard";
+import { isPromptInjectionMessage, isSpamMessage } from "./services/spam-guard";
 import {
   banUser,
   buildTelegramMessageRecord,
@@ -512,6 +512,26 @@ bot.command("start", (ctx) => {
   ctx.reply(MESSAGES.start);
 });
 
+// Ignore messages that try to reprogram the bot. The user is not banned.
+const isIgnoredPromptInjection = async (
+  ctx: Context,
+  question: string,
+): Promise<boolean> => {
+  if (!(await isPromptInjectionMessage(question))) {
+    return false;
+  }
+  void sendChannelLog(
+    [
+      "🛡️ Prompt injection ignored",
+      `Chat: ${formatChatLabel(ctx.chat)}`,
+      `User: ${formatUserLabel(ctx.from)}`,
+      `MessageId: ${ctx.message?.message_id ?? "unknown"}`,
+      `Text: ${question.slice(0, 300)}`,
+    ].join("\n"),
+  );
+  return true;
+};
+
 bot.command("ask", async (ctx) => {
   try {
     const question = ctx.message?.text.split(" ").slice(1).join(" ");
@@ -520,6 +540,9 @@ bot.command("ask", async (ctx) => {
     ]);
     if (!question) {
       await ctx.reply(MESSAGES.askMissingQuestion);
+      return;
+    }
+    if (await isIgnoredPromptInjection(ctx, question)) {
       return;
     }
     const chatId = ctx.chat?.id;
@@ -636,6 +659,9 @@ bot.command("ask_group", async (ctx) => {
 
     if (!question) {
       await ctx.reply(MESSAGES.askGroupMissingQuestion);
+      return;
+    }
+    if (await isIgnoredPromptInjection(ctx, question)) {
       return;
     }
 
@@ -1154,6 +1180,9 @@ bot.on("message", async (ctx) => {
           if (!shouldRespondToBotReply(classification)) {
             return;
           }
+          if (await isIgnoredPromptInjection(ctx, rawMessage.text)) {
+            return;
+          }
 
           const requestMessageId = ctx.message.message_id;
           const messageThreadId = getTelegramMessageThreadId(ctx.message);
@@ -1211,6 +1240,9 @@ bot.on("message", async (ctx) => {
 
     const question = privateQuestion ?? groupMentionQuestion;
     if (!question) {
+      return;
+    }
+    if (await isIgnoredPromptInjection(ctx, question)) {
       return;
     }
 
