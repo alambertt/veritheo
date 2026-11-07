@@ -13,7 +13,11 @@ import {
   requeueStuckLlmJobs,
   type LlmJob,
 } from "./sqlite";
-import { sendTelegramText } from "./telegram-send";
+import {
+  describeTelegramSendError,
+  isBotForbiddenError,
+  sendTelegramText,
+} from "./telegram-send";
 import { verifyMessageContent } from "./verify";
 import { buildPersonaResponseText } from "./persona";
 import { formatErrorForLog } from "./log-redaction";
@@ -201,6 +205,16 @@ export function startLlmQueueWorker(
               markLlmJobDone(db, job.id);
             }
           } catch (error) {
+            // Retrying or sending the error message would fail the same way.
+            if (isBotForbiddenError(error)) {
+              const reason = describeTelegramSendError(error);
+              console.warn(
+                `Skipping LLM job ${job.id}: bot cannot write to chat ${job.chat_id} (${reason}).`,
+              );
+              markLlmJobSkipped(db, job.id, reason);
+              return;
+            }
+
             const details = formatErrorForLog(error);
             markLlmJobFailed(db, {
               jobId: job.id,
