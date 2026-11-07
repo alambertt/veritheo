@@ -661,6 +661,9 @@ bot.command("ask_group", async (ctx) => {
       await ctx.reply(MESSAGES.askGroupMissingQuestion);
       return;
     }
+    if (await isIgnoredPromptInjection(ctx, question)) {
+      return;
+    }
 
     if (chatId) {
       contextMessages = await buildRecentGroupContextMessages(
