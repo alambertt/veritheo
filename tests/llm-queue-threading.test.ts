@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it, mock } from "bun:test";
+import { GrammyError } from "grammy";
 import {
   enqueueLlmJob,
   setChatPersona,
@@ -147,5 +148,63 @@ describe("LLM queue threaded replies", () => {
     expect(sendCalls[0]?.text).toBe("🎭 Persona pentecostal\n\nFinal answer");
     expect(sendCalls[0]?.options.message_thread_id).toBe(9);
     expect(sendCalls[0]?.options.reply_to_message_id).toBe(76);
+  });
+
+  it("skips a job without retry or error reply when the bot was kicked", async () => {
+    const db = new Database(":memory:");
+    setupSchema(db);
+    let sendCount = 0;
+    const errors: string[] = [];
+    const bot = {
+      api: {
+        raw: {},
+        sendMessage: async () => {
+          sendCount += 1;
+          throw new GrammyError(
+            "Call to 'sendMessage' failed!",
+            {
+              ok: false,
+              error_code: 403,
+              description: "Forbidden: bot was kicked from the supergroup chat",
+            },
+            "sendMessage",
+            {},
+          );
+        },
+      },
+    };
+
+    const jobId = enqueueLlmJob(db, {
+      kind: "ask_group",
+      chatId: -100123,
+      requestMessageId: 5,
+      question: "Question",
+    });
+
+    const worker = startLlmQueueWorker(bot as any, db, {
+      pollIntervalMs: 1,
+      onError: (context) => {
+        errors.push(context);
+      },
+    });
+    try {
+      await waitFor(
+        () =>
+          (db.query("SELECT status FROM llm_jobs WHERE id = ?").get(jobId) as {
+            status: string;
+          }).status === "done",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally {
+      worker.stop();
+    }
+
+    expect(sendCount).toBe(1);
+    expect(errors).toEqual([]);
+    const job = db
+      .query("SELECT attempts, last_error FROM llm_jobs WHERE id = ?")
+      .get(jobId) as { attempts: number; last_error: string };
+    expect(job.attempts).toBe(1);
+    expect(job.last_error).toContain("bot was kicked");
   });
 });

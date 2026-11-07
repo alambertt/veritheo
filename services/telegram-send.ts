@@ -229,7 +229,11 @@ export async function sendTelegramText(
         error.error_code === 400 &&
         /can't parse|cannot parse|entity|entities|rich_message|rich message.*(unsupported|not supported)/i.test(error.description);
       // Opt-in commands must not resend after ambiguous delivery or storage errors.
-      if (params.retryOnFormattingErrorOnly && !formattingRejected) {
+      // A 403 (kicked, blocked) fails the same way in every format.
+      if (
+        isBotForbiddenError(error) ||
+        (params.retryOnFormattingErrorOnly && !formattingRejected)
+      ) {
         throw error;
       }
 
@@ -243,6 +247,11 @@ export async function sendTelegramText(
   }
 
   throw lastError ?? new Error("Failed to send Telegram message.");
+}
+
+/** The bot can no longer write to the chat (kicked, blocked, or not a member). */
+export function isBotForbiddenError(error: unknown): boolean {
+  return error instanceof GrammyError && error.error_code === 403;
 }
 
 export function describeTelegramSendError(error: unknown): string {

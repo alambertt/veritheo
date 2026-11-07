@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
+import { GrammyError } from "grammy";
 import { setupSchema } from "../services/sqlite";
 import {
   answerTelegramGuestQuery,
@@ -12,6 +13,28 @@ describe("sendTelegramText", () => {
   beforeEach(() => {
     setupSchema(db);
     db.run("DELETE FROM messages");
+  });
+
+  it("does not retry other formats when the bot was kicked", async () => {
+    let calls = 0;
+    const kicked = new GrammyError(
+      "Call to 'sendMessage' failed!",
+      { ok: false, error_code: 403, description: "Forbidden: bot was kicked from the supergroup chat" },
+      "sendMessage",
+      {},
+    );
+    const api = {
+      raw: {},
+      sendMessage: async () => {
+        calls += 1;
+        throw kicked;
+      },
+    };
+
+    await expect(
+      sendTelegramText(api as any, db, { chatId: -100, text: "*hola*" }),
+    ).rejects.toBe(kicked);
+    expect(calls).toBe(1);
   });
 
   it("sends messages with the provided thread id", async () => {
