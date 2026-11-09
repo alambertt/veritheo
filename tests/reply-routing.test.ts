@@ -4,7 +4,7 @@ import {
   classifyBotReply,
   REPLY_ROUTING_MIN_CONFIDENCE,
   REPLY_SYSTEM_INSTRUCTIONS,
-  shouldRespondToBotReply,
+  resolveBotReplyStrategy,
 } from "../services/reply-routing";
 import {
   isTypeSafeFeatureActive,
@@ -145,17 +145,20 @@ describe("bot reply routing", () => {
     expect(result?.modelTier).toBe("reasoning");
   });
 
-  it("uses the agreed confidence threshold and ignores low-value replies", () => {
+  it("stays silent only on ignore and uses general when the label is uncertain", () => {
     expect(REPLY_ROUTING_MIN_CONFIDENCE).toBe(0.65);
-    expect(
-      shouldRespondToBotReply({ action: "playful", confidence: 0.65 }),
-    ).toBe(true);
-    expect(
-      shouldRespondToBotReply({ action: "follow_up", confidence: 0.64 }),
-    ).toBe(false);
-    expect(
-      shouldRespondToBotReply({ action: "ignore", confidence: 0.99 }),
-    ).toBe(false);
+    expect(resolveBotReplyStrategy({ action: "playful", confidence: 0.65 })).toBe("playful");
+    expect(resolveBotReplyStrategy({ action: "follow_up", confidence: 0.64 })).toBe("general");
+    expect(resolveBotReplyStrategy({ action: "disagreement", confidence: 0.5 })).toBe("general");
+    expect(resolveBotReplyStrategy({ action: "ignore", confidence: 0.3 })).toBeUndefined();
+    expect(resolveBotReplyStrategy({ action: "ignore", confidence: 0.99 })).toBeUndefined();
+  });
+
+  it("always answers a forced reply (bot mention or always-answer user)", () => {
+    const forced = { forceReply: true };
+    expect(resolveBotReplyStrategy({ action: "disagreement", confidence: 0.56 }, forced)).toBe("general");
+    expect(resolveBotReplyStrategy({ action: "ignore", confidence: 0.99 }, forced)).toBe("general");
+    expect(resolveBotReplyStrategy({ action: "follow_up", confidence: 0.9 }, forced)).toBe("follow_up");
   });
 
   it("keeps reply routing active even when its legacy flag is off", async () => {

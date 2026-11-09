@@ -69,7 +69,7 @@ import { findSimilarBotMessageInChatWithJudgment } from "./services/self-message
 import {
   buildReplyRoutingState,
   classifyBotReply,
-  shouldRespondToBotReply,
+  resolveBotReplyStrategy,
 } from "./services/reply-routing";
 import { startTypingIndicator } from "./services/typing-indicator";
 import { buildSourcesMessage } from "./services/sources";
@@ -140,6 +140,8 @@ const UNTOUCHABLE_USER_IDS =
   configuredUntouchableUserIds.length > 0
     ? configuredUntouchableUserIds
     : DEFAULT_UNTOUCHABLE_USER_IDS;
+// Users whose replies to the bot are always answered, even when reply routing would ignore them.
+const ALWAYS_ANSWER_USER_IDS = parseUserIdListEnv("ALWAYS_ANSWER_USER_IDS");
 const configuredBannedUserId = parseUserIdEnv("BANNED_USER_ID");
 const BANNED_USER_IDS = Array.from(
   new Set([
@@ -1185,8 +1187,23 @@ bot.on("message", async (ctx) => {
           }),
         );
 
-        if (classification) {
-          if (!shouldRespondToBotReply(classification)) {
+        const isAlwaysAnswerUser = ALWAYS_ANSWER_USER_IDS.includes(
+          ctx.message.from?.id ?? -1,
+        );
+        if (classification || isAlwaysAnswerUser) {
+          const replyStrategy = classification
+            ? resolveBotReplyStrategy(classification, {
+                forceReply:
+                  isAlwaysAnswerUser ||
+                  getGroupMentionAutoAskQuestion({
+                    chatType: ctx.chat?.type,
+                    text: rawMessage.text,
+                    entities: ctx.message.entities,
+                    botUsername: getBotUsernames(ctx.me.username),
+                  }) !== undefined,
+              })
+            : "general";
+          if (!replyStrategy) {
             return;
           }
           if (await isIgnoredPromptInjection(ctx, rawMessage.text)) {
@@ -1204,8 +1221,8 @@ bot.on("message", async (ctx) => {
             requestMessageId,
             question: rawMessage.text.trim(),
             contextMessages: replyContextMessages,
-            replyStrategy: classification.action,
-            replyModelTier: classification.modelTier,
+            replyStrategy,
+            replyModelTier: classification?.modelTier ?? "reasoning",
           });
           const pendingJobs = countPendingLlmJobsForChat(
             database,

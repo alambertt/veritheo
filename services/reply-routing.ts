@@ -76,7 +76,10 @@ const REPLY_ROUTING_QUESTION = {
       disagreement: {
         meaning:
           "A challenge, correction, or reasoned disagreement with a substantive point in the previous answer.",
-        examples: ["Creo que esa cita no dice eso en su contexto."],
+        examples: [
+          "Creo que esa cita no dice eso en su contexto.",
+          "Pero mira lo que pasó en Inglaterra, ¿no podría pasar lo mismo aquí?",
+        ],
       },
       new_topic: {
         meaning:
@@ -157,12 +160,16 @@ export async function classifyBotReply(
   return { action, confidence: answer.confidence, modelTier };
 }
 
-export function shouldRespondToBotReply(classification: {
-  action: ReplyRoutingAction;
-  confidence: number;
-}): classification is { action: ReplyStrategy; confidence: number } {
-  return (
-    classification.action !== "ignore" &&
-    classification.confidence >= REPLY_ROUTING_MIN_CONFIDENCE
-  );
+export function resolveBotReplyStrategy(
+  classification: { action: ReplyRoutingAction; confidence: number },
+  options?: { forceReply?: boolean },
+): ReplyStrategy | undefined {
+  if (classification.action === "ignore") {
+    // Explicit @mentions and always-answer users are never ignored.
+    return options?.forceReply ? "general" : undefined;
+  }
+  // Low confidence means the router is unsure of the label, not that the reply deserves silence.
+  return classification.confidence >= REPLY_ROUTING_MIN_CONFIDENCE
+    ? classification.action
+    : "general";
 }
