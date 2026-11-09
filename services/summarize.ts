@@ -25,6 +25,7 @@ export async function summarizeText(
 
   const { text: summaryCandidate, usage } = await generateText({
     model: google(GOOGLE_MODEL_BASIC),
+    maxRetries: 0, // callers fall back to truncation; retries only delay the reply
     system: systemPrompt.replace("{{limit}}", String(limitChars)),
     providerOptions: {
       google: {

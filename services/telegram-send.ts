@@ -66,14 +66,24 @@ async function limitTelegramText(
     return text;
   }
 
-  if (!allowAISummarization) {
+  const truncate = () => {
     const notice = "\n\n[Respuesta recortada por el límite de Telegram.]";
     const end = limit - notice.length;
     // Avoid splitting a UTF-16 surrogate pair at the cutoff.
     const cutoff = /[\uD800-\uDBFF]/.test(text[end - 1] ?? "") ? end - 1 : end;
     return text.slice(0, cutoff) + notice;
+  };
+
+  if (!allowAISummarization) {
+    return truncate();
   }
-  return summarizeText(text, limit);
+  try {
+    return await summarizeText(text, limit);
+  } catch (error) {
+    // The answer already exists; a saturated summarizer must not fail (and re-run) the whole job.
+    console.warn("⚠️ Summarization failed, truncating instead:", describeSendError(error));
+    return truncate();
+  }
 }
 
 function describeSendError(error: unknown): string {
