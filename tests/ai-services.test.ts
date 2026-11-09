@@ -96,6 +96,7 @@ describe("AI-backed services", () => {
     expect(lastCall.providerOptions.google.serviceTier).toBe("standard");
     expect(lastCall.tools).toBeUndefined();
     expect(lastCall.maxOutputTokens).toBe(400);
+    expect(lastCall.providerOptions.google.thinkingConfig).toEqual({ thinkingLevel: "low" });
   });
 
   it("falls back to grok when google fails with a transient socket error", async () => {

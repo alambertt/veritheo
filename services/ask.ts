@@ -105,6 +105,8 @@ export async function askHandler(
           providerOptions: {
             google: {
               serviceTier: "standard",
+              // Thinking tokens count against maxOutputTokens; default thinking cut fast replies mid-word.
+              ...(useFastModel ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
             },
           },
           timeout: 600000, // 10-minute request deadline

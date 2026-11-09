@@ -23,7 +23,7 @@ import { buildPersonaResponseText } from "./persona";
 import { formatErrorForLog } from "./log-redaction";
 import { REPLY_SYSTEM_INSTRUCTIONS } from "./reply-routing";
 
-const DEFAULT_MAX_CONCURRENT_JOBS = 3;
+const DEFAULT_MAX_CONCURRENT_JOBS = 1;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const GENERIC_ERROR_MESSAGE =
