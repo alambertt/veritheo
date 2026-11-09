@@ -41,9 +41,11 @@ export type GuestBotQuestion = {
   };
 };
 
-function normalizeBotUsername(botUsername?: string): string | undefined {
-  const normalized = botUsername?.trim().replace(/^@/, "").toLowerCase();
-  return normalized ? normalized : undefined;
+function normalizeBotUsernames(botUsername?: string | string[]): string[] {
+  return [botUsername ?? []]
+    .flat()
+    .map((name) => name.trim().replace(/^@/, "").toLowerCase())
+    .filter(Boolean);
 }
 
 function getMessageText(message?: {
@@ -64,10 +66,10 @@ function getMentionEntityText(text: string, entity: TelegramMessageEntity) {
 function isBotMention(
   text: string,
   entity: TelegramMessageEntity,
-  botUsername?: string,
+  botUsername?: string | string[],
 ) {
-  const normalizedBotUsername = normalizeBotUsername(botUsername);
-  if (!normalizedBotUsername || entity.type !== "mention") {
+  const botUsernames = normalizeBotUsernames(botUsername);
+  if (botUsernames.length === 0 || entity.type !== "mention") {
     return false;
   }
 
@@ -76,7 +78,7 @@ function isBotMention(
     .replace(/^@/, "")
     .toLowerCase();
 
-  return mentionText === normalizedBotUsername;
+  return botUsernames.includes(mentionText);
 }
 
 function isCommandText(text?: string, entities: TelegramMessageEntity[] = []) {
@@ -95,7 +97,7 @@ function isCommandText(text?: string, entities: TelegramMessageEntity[] = []) {
 function removeMatchedMentions(
   text: string,
   entities: TelegramMessageEntity[],
-  botUsername?: string,
+  botUsername?: string | string[],
 ) {
   const matchedEntities = entities.filter((entity) =>
     isBotMention(text, entity, botUsername),
@@ -124,7 +126,7 @@ export function getGuestQueryId(message: unknown): string | undefined {
 
 export function getGuestBotQuestion(params: {
   message: unknown;
-  botUsername?: string;
+  botUsername?: string | string[];
   bannedUserIds?: number[];
 }): GuestBotQuestion | undefined {
   const message = params.message as TelegramGuestMessage | undefined;

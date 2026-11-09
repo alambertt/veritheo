@@ -148,6 +148,13 @@ const BANNED_USER_IDS = Array.from(
     ...listBannedUserIds(database),
   ]),
 );
+// Extra Telegram usernames (collectible aliases) that also belong to this bot.
+// getMe only returns the primary username, so list the aliases here.
+const BOT_USERNAME_ALIASES = ["VeritheoAI"];
+const getBotUsernames = (primaryUsername?: string) =>
+  primaryUsername
+    ? [primaryUsername, ...BOT_USERNAME_ALIASES]
+    : BOT_USERNAME_ALIASES;
 const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ?? undefined;
 
 const DATABASE_BACKUP_HOUR_UTC = parseBackupHourUtc(
@@ -253,13 +260,15 @@ const isReplyToThisBot = (
   replyToMessage:
     | { from?: { is_bot?: boolean; username?: string } }
     | undefined,
-  botUsername?: string,
-) =>
-  Boolean(
-    botUsername &&
+  botUsernames: string[],
+) => {
+  const replyUsername = replyToMessage?.from?.username?.toLowerCase();
+  return Boolean(
     replyToMessage?.from?.is_bot === true &&
-    replyToMessage.from.username === botUsername,
+    replyUsername &&
+    botUsernames.some((name) => name.toLowerCase() === replyUsername),
   );
+};
 
 const buildThreadContextEntry = (message: {
   text?: string;
@@ -336,7 +345,7 @@ bot.use(async (ctx, next) => {
 
   const guestQuestion = getGuestBotQuestion({
     message: guestMessage,
-    botUsername: ctx.me.username,
+    botUsername: getBotUsernames(ctx.me.username),
     bannedUserIds: BANNED_USER_IDS,
   });
   if (!guestQuestion) {
@@ -1151,7 +1160,7 @@ bot.on("message", async (ctx) => {
       userCanBeRouted &&
       chatId &&
       replyToMessage &&
-      isReplyToThisBot(replyToMessage, ctx.me.username)
+      isReplyToThisBot(replyToMessage, getBotUsernames(ctx.me.username))
     ) {
       const botMessage = getTelegramMessageText(replyToMessage)?.trim();
       if (botMessage) {
@@ -1230,7 +1239,7 @@ bot.on("message", async (ctx) => {
       chatType: ctx.chat?.type,
       text: rawMessage.text,
       entities: ctx.message.entities,
-      botUsername: ctx.me.username,
+      botUsername: getBotUsernames(ctx.me.username),
       isBot: ctx.message.from?.is_bot,
       isAnonymousAdmin: isAnonymousAdminMessage,
       isCommand,

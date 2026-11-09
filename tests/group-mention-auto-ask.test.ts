@@ -96,4 +96,15 @@ describe("getGroupMentionAutoAskQuestion", () => {
       }),
     ).toBeUndefined();
   });
+
+  it("matches any of the bot usernames, including aliases", () => {
+    expect(
+      getGroupMentionAutoAskQuestion({
+        chatType: "group",
+        text: "@VeritheoAI ¿Quién fue Atanasio?",
+        botUsername: ["veritheo", "VeritheoAI"],
+        entities: [{ type: "mention", offset: 0, length: 11 }],
+      }),
+    ).toBe("¿Quién fue Atanasio?");
+  });
 });

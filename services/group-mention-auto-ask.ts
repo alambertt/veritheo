@@ -8,7 +8,7 @@ type GetGroupMentionAutoAskQuestionParams = {
   chatType?: string;
   text?: string;
   entities?: TelegramMessageEntity[];
-  botUsername?: string;
+  botUsername?: string | string[];
   isBot?: boolean;
   isAnonymousAdmin?: boolean;
   isCommand?: boolean;
@@ -16,9 +16,11 @@ type GetGroupMentionAutoAskQuestionParams = {
   bannedUserIds?: number[];
 };
 
-function normalizeBotUsername(botUsername?: string): string | undefined {
-  const normalized = botUsername?.trim().replace(/^@/, "").toLowerCase();
-  return normalized ? normalized : undefined;
+function normalizeBotUsernames(botUsername?: string | string[]): string[] {
+  return [botUsername ?? []]
+    .flat()
+    .map((name) => name.trim().replace(/^@/, "").toLowerCase())
+    .filter(Boolean);
 }
 
 function getMentionEntityText(text: string, entity: TelegramMessageEntity): string {
@@ -63,8 +65,8 @@ export function getGroupMentionAutoAskQuestion(
   }
 
   const text = params.text?.trim();
-  const botUsername = normalizeBotUsername(params.botUsername);
-  if (!text || !botUsername || !params.entities?.length) {
+  const botUsernames = normalizeBotUsernames(params.botUsername);
+  if (!text || botUsernames.length === 0 || !params.entities?.length) {
     return undefined;
   }
 
@@ -78,7 +80,7 @@ export function getGroupMentionAutoAskQuestion(
       .replace(/^@/, "")
       .toLowerCase();
 
-    return mentionText === botUsername;
+    return botUsernames.includes(mentionText);
   });
 
   if (matchedMentionEntities.length === 0) {

@@ -24,6 +24,20 @@ describe("guest bot helpers", () => {
     expect(result?.chat).toMatchObject({ id: -1001, title: "Theology" });
   });
 
+  it("accepts a mention of a bot alias", () => {
+    const result = getGuestBotQuestion({
+      message: {
+        guest_query_id: "guest-123",
+        text: "@veritheoai what is grace?",
+        entities: [{ type: "mention", offset: 0, length: 11 }],
+        from: { id: 1, is_bot: false },
+      },
+      botUsername: ["veritheo", "VeritheoAI"],
+    });
+
+    expect(result?.question).toBe("what is grace?");
+  });
+
   it("ignores replied message context when the summon has no prompt", () => {
     const result = getGuestBotQuestion({
       message: {
