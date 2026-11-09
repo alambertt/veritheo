@@ -65,6 +65,12 @@ import { getPrivateChatAutoAskQuestion } from "./services/private-chat-auto-ask"
 import { getGroupMentionAutoAskQuestion } from "./services/group-mention-auto-ask";
 import { rankGroupContextMessages } from "./services/group-context-ranking";
 import { getGuestBotQuestion, getGuestQueryId } from "./services/guest-bot";
+import {
+  buildContextEntry,
+  formatContextAuthor,
+  toContextAuthor,
+  type ContextAuthor,
+} from "./services/context-author";
 import { findSimilarBotMessageInChatWithJudgment } from "./services/self-message-guard";
 import {
   buildReplyRoutingState,
@@ -272,22 +278,13 @@ const isReplyToThisBot = (
   );
 };
 
-const buildThreadContextEntry = (message: {
-  text?: string;
-  from_is_bot?: boolean;
-  from_first_name?: string;
-  from_last_name?: string;
-  from_username?: string;
-}) => {
-  const text = message.text?.trim();
-  if (!text) {
-    return undefined;
-  }
+const getContextBotUsernames = () => getBotUsernames(bot.botInfo.username);
 
-  const authorLabel = message.from_is_bot ? "Veritheo" : "Usuario";
+const labelQuestion = (from: Parameters<typeof toContextAuthor>[0], text: string) =>
+  `${formatContextAuthor(toContextAuthor(from), getContextBotUsernames()) ?? "Usuario"}: ${text.trim()}`;
 
-  return `${authorLabel}: ${text}`;
-};
+const buildThreadContextEntry = (message: ContextAuthor & { text?: string }) =>
+  buildContextEntry(message, getContextBotUsernames());
 
 const buildReplyContinuationContext = (
   chainMessages: {
@@ -324,8 +321,11 @@ const buildReplyContinuationContext = (
     return history;
   }
 
-  const fallbackEntry = `${fallbackReplyMessage.from?.is_bot ? "Veritheo" : "Usuario"}: ${fallbackText}`;
-  if (history.at(-1) !== fallbackEntry) {
+  const fallbackEntry = buildThreadContextEntry({
+    ...toContextAuthor(fallbackReplyMessage.from),
+    text: fallbackText,
+  });
+  if (fallbackEntry && history.at(-1) !== fallbackEntry) {
     history.push(fallbackEntry);
   }
   return history;
@@ -577,7 +577,7 @@ bot.command("ask", async (ctx) => {
       chatId,
       messageThreadId,
       requestMessageId,
-      question: question.trim(),
+      question: labelQuestion(ctx.from, question),
       contextMessages,
     });
     const pendingJobs = countPendingLlmJobsForChat(
@@ -611,7 +611,7 @@ const buildRecentGroupContextMessages = async (
   question?: string,
 ): Promise<string[] | undefined> => {
   const storedMessages = getMessagesByChat(database, chatId, {
-    limit: 10,
+    limit: 30, // other bots are dropped below; fetch extra rows to keep 10 messages
     order: "desc",
   });
   const textMessages = storedMessages
@@ -621,7 +621,9 @@ const buildRecentGroupContextMessages = async (
         msg.text.trim() !== "" &&
         msg.message_id !== currentMessageId,
     )
-    .map((msg) => msg.text!.trim())
+    .map(buildThreadContextEntry)
+    .filter((entry): entry is string => Boolean(entry))
+    .slice(0, 10)
     .reverse();
 
   if (textMessages.length === 0) {
@@ -641,7 +643,7 @@ const buildRecentPrivateContextMessages = (
   messageThreadId?: number,
 ): string[] | undefined => {
   const storedMessages = getMessagesByChat(database, chatId, {
-    limit: 10,
+    limit: 30, // other bots are dropped below; fetch extra rows to keep 10 messages
     order: "desc",
     messageThreadId: messageThreadId ?? null,
   });
@@ -652,7 +654,9 @@ const buildRecentPrivateContextMessages = (
         msg.text.trim() !== "" &&
         msg.message_id !== currentMessageId,
     )
-    .map((msg) => msg.text!.trim())
+    .map(buildThreadContextEntry)
+    .filter((entry): entry is string => Boolean(entry))
+    .slice(0, 10)
     .reverse();
 
   return textMessages.length > 0 ? textMessages : undefined;
@@ -694,7 +698,7 @@ bot.command("ask_group", async (ctx) => {
       kind: "ask_group",
       chatId,
       requestMessageId,
-      question,
+      question: labelQuestion(ctx.from, question),
       contextMessages,
     });
     const pendingJobs = countPendingLlmJobsForChat(database, chatId);
@@ -1219,7 +1223,7 @@ bot.on("message", async (ctx) => {
             chatId,
             messageThreadId,
             requestMessageId,
-            question: rawMessage.text.trim(),
+            question: labelQuestion(ctx.message.from, rawMessage.text),
             contextMessages: replyContextMessages,
             replyStrategy,
             replyModelTier: classification?.modelTier ?? "reasoning",
@@ -1301,7 +1305,7 @@ bot.on("message", async (ctx) => {
       chatId,
       messageThreadId: privateQuestion ? messageThreadId : undefined,
       requestMessageId,
-      question,
+      question: labelQuestion(ctx.message.from, question),
       contextMessages,
     });
     const pendingJobs = countPendingLlmJobsForChat(
