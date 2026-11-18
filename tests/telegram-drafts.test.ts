@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { GrammyError } from "grammy";
 import { createTelegramDraftStreamer } from "../services/telegram-drafts";
 
 describe("createTelegramDraftStreamer", () => {
@@ -27,5 +28,33 @@ describe("createTelegramDraftStreamer", () => {
       message_thread_id: 7,
       draft_id: 99,
     });
+  });
+
+  it("stops sending drafts while Telegram rate limits them", async () => {
+    let calls = 0;
+    const api = {
+      raw: {
+        sendMessageDraft: async () => {
+          calls += 1;
+          throw new GrammyError(
+            "Call to 'sendMessageDraft' failed!",
+            {
+              ok: false,
+              error_code: 429,
+              description: "Too Many Requests: retry after 10",
+              parameters: { retry_after: 10 },
+            },
+            "sendMessageDraft",
+            {},
+          );
+        },
+      },
+    };
+
+    const streamer = createTelegramDraftStreamer(api as any, { chatId: 123 });
+    await streamer.update("Partial");
+    await streamer.finish("Partial response, now complete");
+
+    expect(calls).toBe(1);
   });
 });

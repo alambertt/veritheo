@@ -11,6 +11,8 @@ export const DEFAULT_DATABASE_BACKUP_HOUR_UTC = 3;
 export const DEFAULT_DATABASE_BACKUP_CHECK_INTERVAL_MS = 60_000;
 export const DATABASE_BACKUP_RETRY_DELAY_MS = 15 * 60 * 1000;
 export const TELEGRAM_DOCUMENT_MAX_BYTES = 50 * 1024 * 1024;
+// A local Bot API server (telegram-bot-api --local) accepts uploads up to 2000 MB.
+export const LOCAL_API_DOCUMENT_MAX_BYTES = 2000 * 1024 * 1024;
 
 export type DatabaseBackup = ChannelDocument & {
   date: string;
@@ -74,6 +76,7 @@ async function gzipFile(sourcePath: string, destinationPath: string) {
 export async function createDatabaseBackup(
   db: Database,
   now = new Date(),
+  maxBytes = TELEGRAM_DOCUMENT_MAX_BYTES,
 ): Promise<DatabaseBackup> {
   const date = utcDateKey(now);
   const filename = `veritheo-${date}.sqlite.gz`;
@@ -89,9 +92,9 @@ export async function createDatabaseBackup(
     const gzipFileHandle = Bun.file(gzipPath);
     const originalBytes = snapshotFile.size;
     const compressedBytes = gzipFileHandle.size;
-    if (compressedBytes > TELEGRAM_DOCUMENT_MAX_BYTES) {
+    if (compressedBytes > maxBytes) {
       throw new Error(
-        `Database backup is larger than the Telegram 50 MB limit (${compressedBytes} bytes)`,
+        `Database backup is larger than the Telegram ${formatByteSize(maxBytes)} limit (${compressedBytes} bytes). Set TELEGRAM_API_ROOT to a local Bot API server to raise the limit.`,
       );
     }
 
@@ -118,9 +121,14 @@ export async function createDatabaseBackup(
 export async function uploadDatabaseBackup(params: {
   db: Database;
   now?: Date;
+  maxBytes?: number;
   sendChannelDocument: (document: ChannelDocument) => Promise<void>;
 }): Promise<DatabaseBackup> {
-  const backup = await createDatabaseBackup(params.db, params.now);
+  const backup = await createDatabaseBackup(
+    params.db,
+    params.now,
+    params.maxBytes,
+  );
 
   await params.sendChannelDocument(backup);
   return backup;
@@ -130,6 +138,7 @@ type BackupSchedulerOptions = {
   hourUtc?: number;
   checkIntervalMs?: number;
   now?: () => Date;
+  maxBytes?: number;
   sendChannelDocument: (document: ChannelDocument) => Promise<void>;
   onError?: (context: string, error: unknown) => Promise<void> | void;
 };
@@ -170,6 +179,7 @@ export function startDatabaseBackupScheduler(
       const backup = await uploadDatabaseBackup({
         db,
         now,
+        maxBytes: options.maxBytes,
         sendChannelDocument: options.sendChannelDocument,
       });
       lastBackupDate = backup.date;

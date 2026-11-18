@@ -107,7 +107,7 @@ describe("channel log formatting helpers", () => {
     }) as typeof fetch;
 
     try {
-      const logger = createChannelLogger("token", "123");
+      const logger = createChannelLogger("token", "123", "http://localhost:8081/");
       await logger.sendChannelDocument({
         filename: "veritheo-2026-09-05.sqlite.gz",
         bytes: new Uint8Array([1, 2, 3]),
@@ -115,7 +115,7 @@ describe("channel log formatting helpers", () => {
         contentType: "application/gzip",
       });
       expect(calls).toHaveLength(1);
-      expect(calls[0]?.url).toContain("/sendDocument");
+      expect(calls[0]?.url).toBe("http://localhost:8081/bottoken/sendDocument");
       expect(calls[0]?.body.get("chat_id")).toBe("-100123");
       expect(calls[0]?.body.get("caption")).toBe("backup");
       const file = calls[0]?.body.get("document") as File;

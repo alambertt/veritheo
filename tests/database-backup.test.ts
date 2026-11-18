@@ -61,6 +61,15 @@ describe("database backup", () => {
     ).toBe(true);
   });
 
+  it("rejects a backup larger than the given limit", async () => {
+    const db = new Database(":memory:");
+    setupSchema(db);
+
+    await expect(createDatabaseBackup(db, new Date(), 1)).rejects.toThrow(
+      "larger than the Telegram",
+    );
+  });
+
   it("creates a gzip sqlite snapshot that can be restored", async () => {
     const db = new Database(":memory:");
     setupSchema(db);

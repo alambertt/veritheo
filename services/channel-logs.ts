@@ -107,9 +107,10 @@ async function postFormToTelegram(
   token: string,
   method: string,
   form: FormData,
+  apiRoot: string,
 ) {
   const response = await fetch(
-    `${TELEGRAM_API_BASE_URL}/bot${token}/${method}`,
+    `${apiRoot}/bot${token}/${method}`,
     {
       method: "POST",
       body: form,
@@ -182,6 +183,8 @@ export type ChannelDocument = {
 export function createChannelLogger(
   botToken?: string,
   channelId?: string | number,
+  // Only documents use this root. A local Bot API server lifts the 50 MB cap.
+  documentApiRoot = TELEGRAM_API_BASE_URL,
 ) {
   async function sendChannelLog(message: string): Promise<void> {
     if (!botToken || !channelId) {
@@ -220,7 +223,12 @@ export function createChannelLogger(
     );
 
     try {
-      await postFormToTelegram(botToken, "sendDocument", form);
+      await postFormToTelegram(
+        botToken,
+        "sendDocument",
+        form,
+        documentApiRoot.replace(/\/+$/, ""),
+      );
     } catch (logError) {
       console.error("Failed to send document to channel:", formatErrorForLog(logError));
       throw logError;

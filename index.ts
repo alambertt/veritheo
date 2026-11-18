@@ -7,6 +7,7 @@ import {
   formatUserLabel,
 } from "./services/channel-logs";
 import {
+  LOCAL_API_DOCUMENT_MAX_BYTES,
   parseBackupHourUtc,
   startDatabaseBackupScheduler,
 } from "./services/database-backup";
@@ -165,11 +166,14 @@ const getBotUsernames = (primaryUsername?: string) =>
     : BOT_USERNAME_ALIASES;
 const CHANNEL_LOGS_ID = process.env.CHANNEL_LOGS_ID ?? undefined;
 
+// Optional local Bot API server. Only the backup upload uses it.
+const TELEGRAM_API_ROOT = process.env.TELEGRAM_API_ROOT?.trim() || undefined;
+
 const DATABASE_BACKUP_HOUR_UTC = parseBackupHourUtc(
   process.env.DATABASE_BACKUP_HOUR_UTC,
 );
 const { sendChannelLog, sendChannelDocument, notifyError, logCommandInvocation } =
-  createChannelLogger(token, CHANNEL_LOGS_ID);
+  createChannelLogger(token, CHANNEL_LOGS_ID, TELEGRAM_API_ROOT);
 
 const isGroupPauseControlChat = (chatType?: string) =>
   isGroupChatType(chatType);
@@ -1342,6 +1346,7 @@ startBroadcastQueueWorker(bot, database, {
 });
 startDatabaseBackupScheduler(database, {
   hourUtc: DATABASE_BACKUP_HOUR_UTC,
+  maxBytes: TELEGRAM_API_ROOT ? LOCAL_API_DOCUMENT_MAX_BYTES : undefined,
   sendChannelDocument,
   onError: notifyError,
 });

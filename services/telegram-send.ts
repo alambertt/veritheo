@@ -223,15 +223,24 @@ export async function sendTelegramText(
     } catch (error) {
       lastError = error;
 
-      // Gracefully skip messages to deleted/archived threads
+      // The topic was deleted (for example, the user cleared the chat).
+      // In a private chat, send the answer outside the topic so the user still gets it.
       if (
         error instanceof GrammyError &&
         error.description.includes("message thread not found")
       ) {
+        // Groups keep the old behavior: a deleted group topic gets no answer.
+        if (typeof params.messageThreadId !== "number" || params.chatId < 0) {
+          return undefined;
+        }
         console.warn(
-          `Skipping message to chat ${params.chatId}: thread ${params.messageThreadId} not found.`,
+          `Thread ${params.messageThreadId} not found in chat ${params.chatId}. Sending without a thread.`,
         );
-        return undefined;
+        return sendTelegramText(api, db, {
+          ...params,
+          messageThreadId: undefined,
+          replyToMessageId: undefined,
+        });
       }
 
       const formattingRejected =

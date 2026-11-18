@@ -1,8 +1,8 @@
-import type { Api } from "grammy";
+import { GrammyError, type Api } from "grammy";
 
 const TELEGRAM_DRAFT_TEXT_LIMIT = 4096;
-const TELEGRAM_DRAFT_UPDATE_INTERVAL_MS = 400;
-const TELEGRAM_DRAFT_MIN_TEXT_GROWTH = 48;
+// Telegram answers 429 when drafts arrive faster than about one per second.
+const TELEGRAM_DRAFT_UPDATE_INTERVAL_MS = 1000;
 const MAX_DRAFT_ID = 2_147_483_647;
 
 type SendMessageDraftPayload = {
@@ -52,6 +52,7 @@ export function createTelegramDraftStreamer(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let queue = Promise.resolve();
   let finished = false;
+  let blockedUntil = 0;
 
   const clearTimer = () => {
     if (!timer) {
@@ -63,7 +64,12 @@ export function createTelegramDraftStreamer(
   };
 
   const sendDraft = async (text: string) => {
-    if (finished || text.trim() === "" || text === lastSentText) {
+    if (
+      finished ||
+      Date.now() < blockedUntil ||
+      text.trim() === "" ||
+      text === lastSentText
+    ) {
       return;
     }
 
@@ -79,6 +85,17 @@ export function createTelegramDraftStreamer(
       lastSentText = text;
       lastSentAt = Date.now();
     } catch (error) {
+      if (error instanceof GrammyError && error.error_code === 429) {
+        // Drafts are optional. Stay silent until Telegram allows more.
+        blockedUntil =
+          Date.now() + (error.parameters?.retry_after ?? 5) * 1000;
+        return;
+      }
+      if (error instanceof GrammyError && error.error_code === 400) {
+        // The chat or topic cannot take drafts. More attempts fail the same way.
+        finished = true;
+        clearTimer();
+      }
       console.warn("Failed to send Telegram message draft:", error);
     }
   };
@@ -103,14 +120,9 @@ export function createTelegramDraftStreamer(
       return;
     }
 
-    const textGrowth = nextText.length - lastSentText.length;
     const elapsed = Date.now() - lastSentAt;
 
-    if (
-      !force &&
-      elapsed < TELEGRAM_DRAFT_UPDATE_INTERVAL_MS &&
-      textGrowth < TELEGRAM_DRAFT_MIN_TEXT_GROWTH
-    ) {
+    if (!force && elapsed < TELEGRAM_DRAFT_UPDATE_INTERVAL_MS) {
       const waitTime = TELEGRAM_DRAFT_UPDATE_INTERVAL_MS - elapsed;
       if (!timer) {
         timer = setTimeout(() => {

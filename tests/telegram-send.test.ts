@@ -37,6 +37,39 @@ describe("sendTelegramText", () => {
     expect(calls).toBe(1);
   });
 
+  it("sends outside the topic when a private chat topic was deleted", async () => {
+    const threadIds: unknown[] = [];
+    const api = {
+      raw: {},
+      sendMessage: async (
+        chatId: number,
+        text: string,
+        options: Record<string, unknown>,
+      ) => {
+        threadIds.push(options.message_thread_id);
+        if (options.message_thread_id) {
+          throw new GrammyError(
+            "Call to 'sendMessage' failed!",
+            { ok: false, error_code: 400, description: "Bad Request: message thread not found" },
+            "sendMessage",
+            {},
+          );
+        }
+        return { message_id: 5, date: 1, chat: { id: chatId, type: "private" }, text };
+      },
+    };
+
+    const sent = await sendTelegramText(api as any, db, {
+      chatId: 123,
+      messageThreadId: 7,
+      replyToMessageId: 4,
+      text: "hola",
+      preferMarkdown: false,
+    });
+    expect(sent?.message_id).toBe(5);
+    expect(threadIds).toEqual([7, undefined]);
+  });
+
   it("sends messages with the provided thread id", async () => {
     const calls: Array<{
       chatId: number;
