@@ -40,7 +40,11 @@ import {
   shouldBlockActivityWhilePaused,
 } from "./services/chat-pause";
 import { verifyMessageContent } from "./services/verify";
-import { isPromptInjectionMessage, isSpamMessage } from "./services/spam-guard";
+import {
+  isPromptInjectionMessage,
+  isServerOperationRequest,
+  isSpamMessage,
+} from "./services/spam-guard";
 import {
   banUser,
   buildTelegramMessageRecord,
@@ -55,8 +59,11 @@ import {
   getMessagesByChat,
   initializeDatabase,
   isChatPaused,
+  isPromptInjectionBlocked,
+  isRecordedPromptInjection,
   listBannedUserIds,
   mapToTelegramRawMessage,
+  recordPromptInjectionAttempt,
   resumeChatPause,
   setChatPauseState,
   setChatPersona,
@@ -287,8 +294,26 @@ const getContextBotUsernames = () => getBotUsernames(bot.botInfo.username);
 const labelQuestion = (from: Parameters<typeof toContextAuthor>[0], text: string) =>
   `${formatContextAuthor(toContextAuthor(from), getContextBotUsernames()) ?? "Usuario"}: ${text.trim()}`;
 
-const buildThreadContextEntry = (message: ContextAuthor & { text?: string }) =>
-  buildContextEntry(message, getContextBotUsernames());
+const messageEventKey = (chatId: number, messageId: number) =>
+  `message:${chatId}:${messageId}`;
+
+type ContextMessage = ContextAuthor & {
+  chat_id?: number;
+  message_id?: number;
+  text?: string;
+};
+
+const isIgnoredContextMessage = (message: ContextMessage): boolean =>
+  !message.from_is_bot && (
+    Boolean(message.text && isServerOperationRequest(message.text)) ||
+    (message.chat_id !== undefined && message.message_id !== undefined &&
+      isRecordedPromptInjection(database, messageEventKey(message.chat_id, message.message_id)))
+  );
+
+const buildThreadContextEntry = (message: ContextMessage) =>
+  isIgnoredContextMessage(message)
+    ? undefined
+    : buildContextEntry(message, getContextBotUsernames());
 
 const buildReplyContinuationContext = (
   chainMessages: {
@@ -357,6 +382,18 @@ bot.use(async (ctx, next) => {
   if (!guestQuestion) {
     return;
   }
+  const userId = guestQuestion.from?.id;
+  if (
+    (userId !== undefined && isPromptInjectionBlocked(database, userId)) ||
+    await isIgnoredPromptInjection(ctx, guestQuestion.question, {
+      userId,
+      eventKey: guestQuestion.chat?.id !== undefined && guestQuestion.messageId !== undefined
+        ? messageEventKey(guestQuestion.chat.id, guestQuestion.messageId)
+        : `guest:${guestQueryId}`,
+    })
+  ) {
+    return;
+  }
 
   void sendChannelLog(
     [
@@ -405,6 +442,10 @@ bot.use(async (ctx, next) => {
   const message = ctx.message;
   if (!message) {
     return next();
+  }
+
+  if (message.from && isPromptInjectionBlocked(database, message.from.id)) {
+    return;
   }
 
   if (message.from?.id && BANNED_USER_IDS.includes(message.from.id)) {
@@ -527,37 +568,53 @@ bot.command("start", (ctx) => {
   ctx.reply(MESSAGES.start);
 });
 
-// Ignore messages that try to reprogram the bot. The user is not banned.
-const isIgnoredPromptInjection = async (
+async function isIgnoredPromptInjection(
   ctx: Context,
   question: string,
-): Promise<boolean> => {
-  if (!(await isPromptInjectionMessage(question))) {
+  guest?: { userId?: number; eventKey: string },
+): Promise<boolean> {
+  const message = ctx.message;
+  const eventKey = guest?.eventKey ??
+    (message && messageEventKey(message.chat.id, message.message_id));
+  if (eventKey && isRecordedPromptInjection(database, eventKey)) {
+    return true;
+  }
+
+  const local = isServerOperationRequest(question);
+  if (!local && !(await isPromptInjectionMessage(question))) {
     return false;
   }
-  void sendChannelLog(
-    [
-      "🛡️ Prompt injection ignored",
-      `Chat: ${formatChatLabel(ctx.chat)}`,
-      `User: ${formatUserLabel(ctx.from)}`,
-      `MessageId: ${ctx.message?.message_id ?? "unknown"}`,
-      `Text: ${question.slice(0, 300)}`,
-    ].join("\n"),
-  );
+
+  const sender = message?.from;
+  const userId = guest?.userId ??
+    (message && !("sender_chat" in message) && sender && !sender.is_bot
+      ? sender.id
+      : undefined);
+  const detector = local ? "local" : "gemini";
+  const blockedUntil = eventKey && userId !== undefined
+    ? recordPromptInjectionAttempt(database, { userId, eventKey, detector })
+    : undefined;
+  console.info("[Prompt guard] ignored prompt injection", {
+    updateId: ctx.update.update_id,
+    messageId: message?.message_id,
+    detector,
+    userId,
+    blockedUntil,
+  });
   return true;
-};
+}
 
 bot.command("ask", async (ctx) => {
   try {
     const question = ctx.message?.text.split(" ").slice(1).join(" ");
+    if (question && await isIgnoredPromptInjection(ctx, question)) {
+      return;
+    }
     logCommandInvocation(ctx, "/ask", [
       `Question: ${question?.trim() || "[none provided]"}`,
     ]);
     if (!question) {
       await ctx.reply(MESSAGES.askMissingQuestion);
-      return;
-    }
-    if (await isIgnoredPromptInjection(ctx, question)) {
       return;
     }
     const chatId = ctx.chat?.id;
@@ -669,6 +726,9 @@ const buildRecentPrivateContextMessages = (
 bot.command("ask_group", async (ctx) => {
   try {
     const question = ctx.message?.text.split(" ").slice(1).join(" ").trim();
+    if (question && await isIgnoredPromptInjection(ctx, question)) {
+      return;
+    }
     console.log("🚀 ~ question:", question);
     logCommandInvocation(ctx, "/ask_group", [
       `Question: ${question || "[none provided]"}`,
@@ -678,9 +738,6 @@ bot.command("ask_group", async (ctx) => {
 
     if (!question) {
       await ctx.reply(MESSAGES.askGroupMissingQuestion);
-      return;
-    }
-    if (await isIgnoredPromptInjection(ctx, question)) {
       return;
     }
 
@@ -737,6 +794,9 @@ bot.command("theology_poll", async (ctx) => {
     }
 
     const prompt = getCommandArgs(ctx.message?.text);
+    if (prompt && await isIgnoredPromptInjection(ctx, prompt)) {
+      return;
+    }
     logCommandInvocation(ctx, "/theology_poll", [
       `Prompt: ${prompt || "[random topic]"}`,
     ]);
@@ -949,11 +1009,6 @@ bot.command("roast", async (ctx) => {
       : "";
     const replyToId = replyToMessage?.message_id;
 
-    logCommandInvocation(ctx, "/roast", [
-      `ReplyToMessageId: ${replyToId ?? "none"}`,
-      `Argument: ${directArgument || "[none provided]"}`,
-    ]);
-
     let messageToRoast: string | undefined;
     let authorName: string | undefined;
     let authorId: number | undefined;
@@ -1012,8 +1067,16 @@ bot.command("roast", async (ctx) => {
     }
 
     if (!messageToRoast && directArgument) {
+      if (await isIgnoredPromptInjection(ctx, directArgument)) {
+        return;
+      }
       messageToRoast = directArgument;
     }
+
+    logCommandInvocation(ctx, "/roast", [
+      `ReplyToMessageId: ${replyToId ?? "none"}`,
+      `Argument: ${directArgument || "[none provided]"}`,
+    ]);
 
     if (!messageToRoast) {
       await ctx.reply(MESSAGES.roastMissingArgument);
@@ -1124,7 +1187,54 @@ bot.on("message", async (ctx) => {
     const record = buildTelegramMessageRecord(rawMessage);
     storeTelegramMessage(database, record);
 
+    if (ctx.chat?.id && isGroupChatType(ctx.chat.type) && isChatPaused(database, ctx.chat.id)) {
+      return;
+    }
+
+    const isCommand = isCommandMessage(ctx.message.text, ctx.message.entities);
+    const isAnonymousAdminMessage =
+      "sender_chat" in ctx.message && ctx.message.sender_chat !== undefined;
+    const replyToMessage = ctx.message.reply_to_message;
     const senderId = ctx.message.from?.id;
+    const chatId = ctx.chat?.id;
+    const isReplyRoutingChat =
+      ctx.chat?.type === "private" || isGroupChatType(ctx.chat?.type);
+    const userCanBeRouted =
+      isReplyRoutingChat &&
+      !isCommand &&
+      !isAnonymousAdminMessage &&
+      ctx.message.from?.is_bot !== true &&
+      !BANNED_USER_IDS.includes(senderId ?? -1);
+    const replyToBot =
+      userCanBeRouted && replyToMessage &&
+      isReplyToThisBot(replyToMessage, getBotUsernames(ctx.me.username))
+        ? replyToMessage
+        : undefined;
+    const privateQuestion = getPrivateChatAutoAskQuestion({
+      chatType: ctx.chat?.type,
+      text: rawMessage.text,
+      isBot: ctx.message.from?.is_bot,
+      isCommand,
+      userId: senderId,
+      bannedUserIds: BANNED_USER_IDS,
+    });
+    const groupMentionQuestion = getGroupMentionAutoAskQuestion({
+      chatType: ctx.chat?.type,
+      text: rawMessage.text,
+      entities: ctx.message.entities,
+      botUsername: getBotUsernames(ctx.me.username),
+      isBot: ctx.message.from?.is_bot,
+      isAnonymousAdmin: isAnonymousAdminMessage,
+      isCommand,
+      userId: senderId,
+      bannedUserIds: BANNED_USER_IDS,
+    });
+    const question = privateQuestion ?? groupMentionQuestion;
+    const prompt = question ?? (replyToBot ? rawMessage.text : undefined);
+    if (prompt && await isIgnoredPromptInjection(ctx, prompt)) {
+      return;
+    }
+
     // ponytail: checks private chats only, where the ad spam arrives. Add group mentions if spam starts there.
     if (
       ctx.chat?.type === "private" &&
@@ -1132,7 +1242,7 @@ bot.on("message", async (ctx) => {
       ctx.message.from?.is_bot !== true &&
       !BANNED_USER_IDS.includes(senderId) &&
       !UNTOUCHABLE_USER_IDS.includes(senderId) &&
-      !isCommandMessage(ctx.message.text, ctx.message.entities) &&
+      !isCommand &&
       (await isSpamMessage(rawMessage.text))
     ) {
       banUser(database, senderId, "auto: spam");
@@ -1148,76 +1258,42 @@ bot.on("message", async (ctx) => {
       return;
     }
 
-    if (ctx.chat?.id && isGroupChatType(ctx.chat.type) && isChatPaused(database, ctx.chat.id)) {
-      return;
-    }
-
-    const isCommand = isCommandMessage(ctx.message.text, ctx.message.entities);
-    const isAnonymousAdminMessage =
-      "sender_chat" in ctx.message && ctx.message.sender_chat !== undefined;
-    const replyToMessage = ctx.message.reply_to_message;
-    const chatId = ctx.chat?.id;
-    const isReplyRoutingChat =
-      ctx.chat?.type === "private" || isGroupChatType(ctx.chat?.type);
-    const userCanBeRouted =
-      isReplyRoutingChat &&
-      !isCommand &&
-      !isAnonymousAdminMessage &&
-      ctx.message.from?.is_bot !== true &&
-      !BANNED_USER_IDS.includes(ctx.message.from?.id ?? -1);
-
-    if (
-      userCanBeRouted &&
-      chatId &&
-      replyToMessage &&
-      isReplyToThisBot(replyToMessage, getBotUsernames(ctx.me.username))
-    ) {
-      const botMessage = getTelegramMessageText(replyToMessage)?.trim();
+    if (chatId && replyToBot) {
+      const botMessage = getTelegramMessageText(replyToBot)?.trim();
       if (botMessage) {
         const replyChain = getReplyChainMessages(
           database,
           chatId,
-          replyToMessage.message_id,
+          replyToBot.message_id,
           { limit: 4 },
-        );
+        ).filter((message) => !isIgnoredContextMessage(message));
         const replyContextMessages = buildReplyContinuationContext(
           replyChain,
           ctx.message.message_id,
-          replyToMessage,
+          replyToBot,
         );
         const classification = await classifyBotReply(
           buildReplyRoutingState({
             previousMessages: replyChain.filter(
-              (message) => message.message_id !== replyToMessage.message_id,
+              (message) => message.message_id !== replyToBot.message_id,
             ),
             botMessage,
             userReply: rawMessage.text,
           }),
         );
 
-        const isAlwaysAnswerUser = ALWAYS_ANSWER_USER_IDS.includes(
-          ctx.message.from?.id ?? -1,
-        );
+        const isAlwaysAnswerUser = ALWAYS_ANSWER_USER_IDS.includes(senderId ?? -1);
         if (classification || isAlwaysAnswerUser) {
           const replyStrategy = classification
             ? resolveBotReplyStrategy(classification, {
                 forceReply:
                   isAlwaysAnswerUser ||
-                  getGroupMentionAutoAskQuestion({
-                    chatType: ctx.chat?.type,
-                    text: rawMessage.text,
-                    entities: ctx.message.entities,
-                    botUsername: getBotUsernames(ctx.me.username),
-                  }) !== undefined,
+                  groupMentionQuestion !== undefined,
               })
             : "general";
           if (!replyStrategy) {
             return;
           }
-          if (await isIgnoredPromptInjection(ctx, rawMessage.text)) {
-            return;
-          }
-
           const requestMessageId = ctx.message.message_id;
           const messageThreadId = getTelegramMessageThreadId(ctx.message);
           const isPrivateChat = ctx.chat?.type === "private";
@@ -1252,31 +1328,7 @@ bot.on("message", async (ctx) => {
       }
     }
 
-    const privateQuestion = getPrivateChatAutoAskQuestion({
-      chatType: ctx.chat?.type,
-      text: rawMessage.text,
-      isBot: ctx.message.from?.is_bot,
-      isCommand,
-      userId: ctx.message.from?.id,
-      bannedUserIds: BANNED_USER_IDS,
-    });
-    const groupMentionQuestion = getGroupMentionAutoAskQuestion({
-      chatType: ctx.chat?.type,
-      text: rawMessage.text,
-      entities: ctx.message.entities,
-      botUsername: getBotUsernames(ctx.me.username),
-      isBot: ctx.message.from?.is_bot,
-      isAnonymousAdmin: isAnonymousAdminMessage,
-      isCommand,
-      userId: ctx.message.from?.id,
-      bannedUserIds: BANNED_USER_IDS,
-    });
-
-    const question = privateQuestion ?? groupMentionQuestion;
     if (!question) {
-      return;
-    }
-    if (await isIgnoredPromptInjection(ctx, question)) {
       return;
     }
 

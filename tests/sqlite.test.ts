@@ -13,8 +13,11 @@ import {
   getReplyChainMessages,
   getUserMessagesForHeresy,
   isChatPaused,
+  isPromptInjectionBlocked,
+  isRecordedPromptInjection,
   mapToTelegramRawMessage,
   queryMessages,
+  recordPromptInjectionAttempt,
   resumeChatPause,
   setChatPauseState,
   setChatPersona,
@@ -22,6 +25,46 @@ import {
   storeHeresyCacheEntry,
   storeTelegramMessage,
 } from "../services/sqlite";
+
+describe("prompt injection blocks", () => {
+  it("blocks on the third distinct attempt and expires without extending the block", () => {
+    using db = new Database(":memory:");
+    setupSchema(db);
+    const record = (eventKey: string, time: number, userId = 7) =>
+      recordPromptInjectionAttempt(db, { userId, eventKey, detector: "gemini" }, time);
+    const start = 1_800_000_000;
+    const until = start + 40 + 7 * 86_400;
+
+    expect(record("message:-100:1", start)).toBeUndefined();
+    expect(record("message:-100:1", start + 10)).toBeUndefined();
+    expect(record("message:-100:2", start + 20)).toBeUndefined();
+    expect(record("message:-200:1", start + 30, 8)).toBeUndefined();
+    expect(isPromptInjectionBlocked(db, 7, start + 39)).toBe(false);
+    expect(record("message:-100:3", start + 40)).toBe(until);
+    expect(isPromptInjectionBlocked(db, 7, until - 1)).toBe(true);
+    expect(isPromptInjectionBlocked(db, 8, until - 1)).toBe(false);
+    expect(record("message:-100:4", until - 1)).toBeUndefined();
+    expect(isRecordedPromptInjection(db, "message:-100:4")).toBe(false);
+    expect(isPromptInjectionBlocked(db, 7, until)).toBe(false);
+    expect(record("message:-100:5", until)).toBeUndefined();
+    expect(isPromptInjectionBlocked(db, 7, until)).toBe(false);
+  });
+
+  it("counts only attempts in the rolling 24-hour window", () => {
+    using db = new Database(":memory:");
+    setupSchema(db);
+    const start = 1_800_000_000;
+    const record = (eventKey: string, time: number) =>
+      recordPromptInjectionAttempt(db, { userId: 7, eventKey, detector: "local" }, time);
+
+    expect(record("first", start)).toBeUndefined();
+    expect(record("second", start + 1)).toBeUndefined();
+    expect(record("third", start + 86_400)).toBeUndefined();
+    expect(isRecordedPromptInjection(db, "first")).toBe(true);
+    expect(isPromptInjectionBlocked(db, 7, start + 86_400)).toBe(false);
+    expect(record("fourth", start + 86_400)).toBe(start + 8 * 86_400);
+  });
+});
 
 describe("sqlite message storage", () => {
   const db = new Database(":memory:");

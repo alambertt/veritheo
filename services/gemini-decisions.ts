@@ -49,6 +49,9 @@ function isFeatureActive(feature: DecisionsFeature): boolean {
   const value = (
     process.env[`GEMINI_DECISIONS_${suffix}`] ?? process.env[`TYPESAFE_${suffix}`]
   )?.trim().toLowerCase();
+  if (value === undefined) {
+    return feature === "prompt-injection-guard";
+  }
   return value === "on" || value === "active";
 }
 

@@ -148,6 +148,27 @@ const CREATE_BANNED_USERS_TABLE = `
   );
 `;
 
+const CREATE_PROMPT_INJECTION_ATTEMPTS_TABLE = `
+  CREATE TABLE IF NOT EXISTS prompt_injection_attempts (
+    event_key TEXT PRIMARY KEY NOT NULL,
+    user_id INTEGER NOT NULL,
+    attempted_at INTEGER NOT NULL,
+    detector TEXT NOT NULL
+  );
+`;
+
+const CREATE_PROMPT_INJECTION_ATTEMPTS_INDEX = `
+  CREATE INDEX IF NOT EXISTS idx_prompt_injection_attempts_user_date
+    ON prompt_injection_attempts (user_id, attempted_at);
+`;
+
+const CREATE_PROMPT_INJECTION_BLOCKS_TABLE = `
+  CREATE TABLE IF NOT EXISTS prompt_injection_blocks (
+    user_id INTEGER PRIMARY KEY,
+    blocked_until INTEGER NOT NULL
+  );
+`;
+
 const insertMessageStatements = new WeakMap<Database, Statement>();
 
 function ensureColumn(
@@ -222,6 +243,9 @@ export function setupSchema(db: Database) {
   db.run(CREATE_BROADCAST_DELIVERIES_TABLE);
   db.run(CREATE_BROADCAST_DELIVERIES_JOB_STATUS_INDEX);
   db.run(CREATE_BANNED_USERS_TABLE);
+  db.run(CREATE_PROMPT_INJECTION_ATTEMPTS_TABLE);
+  db.run(CREATE_PROMPT_INJECTION_ATTEMPTS_INDEX);
+  db.run(CREATE_PROMPT_INJECTION_BLOCKS_TABLE);
 }
 
 export type TelegramRawMessage = {
@@ -1802,4 +1826,59 @@ export function banUser(db: Database, userId: number, reason?: string): void {
 export function listBannedUserIds(db: Database): number[] {
   return (db.query("SELECT user_id FROM banned_users").all() as Array<{ user_id: number }>)
     .map((row) => row.user_id);
+}
+
+const PROMPT_INJECTION_WINDOW_SECONDS = 24 * 60 * 60;
+const PROMPT_INJECTION_BLOCK_SECONDS = 7 * PROMPT_INJECTION_WINDOW_SECONDS;
+const PROMPT_INJECTION_ATTEMPT_LIMIT = 3;
+
+export function isPromptInjectionBlocked(
+  db: Database,
+  userId: number,
+  now = Math.floor(Date.now() / 1000),
+): boolean {
+  return db.query(
+    "SELECT 1 FROM prompt_injection_blocks WHERE user_id = ? AND blocked_until > ?",
+  ).get(userId, now) !== null;
+}
+
+export function isRecordedPromptInjection(db: Database, eventKey: string): boolean {
+  return db.query(
+    "SELECT 1 FROM prompt_injection_attempts WHERE event_key = ?",
+  ).get(eventKey) !== null;
+}
+
+export function recordPromptInjectionAttempt(
+  db: Database,
+  attempt: { userId: number; eventKey: string; detector: "local" | "gemini" },
+  now = Math.floor(Date.now() / 1000),
+): number | undefined {
+  return db.transaction(() => {
+    if (isPromptInjectionBlocked(db, attempt.userId, now)) {
+      return undefined;
+    }
+
+    const result = db.query(
+      `INSERT INTO prompt_injection_attempts (event_key, user_id, attempted_at, detector)
+       VALUES (?, ?, ?, ?) ON CONFLICT(event_key) DO NOTHING`,
+    ).run(attempt.eventKey, attempt.userId, now, attempt.detector);
+    if (result.changes === 0) {
+      return undefined;
+    }
+
+    const count = db.query<{ attempts: number }, [number, number, number]>(
+      `SELECT COUNT(*) AS attempts FROM prompt_injection_attempts
+       WHERE user_id = ? AND attempted_at > ? AND attempted_at <= ?`,
+    ).get(attempt.userId, now - PROMPT_INJECTION_WINDOW_SECONDS, now)?.attempts;
+    if (count === undefined || count < PROMPT_INJECTION_ATTEMPT_LIMIT) {
+      return undefined;
+    }
+
+    const blockedUntil = now + PROMPT_INJECTION_BLOCK_SECONDS;
+    db.query(
+      `INSERT INTO prompt_injection_blocks (user_id, blocked_until) VALUES (?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET blocked_until = excluded.blocked_until`,
+    ).run(attempt.userId, blockedUntil);
+    return blockedUntil;
+  }).immediate();
 }
