@@ -1,8 +1,9 @@
-import { choice, score } from "@typesafe-ai/sdk";
 import {
-  logTypeSafeDecision,
-  runTypeSafeJudgment,
-} from "./typesafe";
+  choice,
+  logGeminiDecision,
+  runGeminiDecision,
+  score,
+} from "./gemini-decisions";
 import type { ReplyModelTier, ReplyStrategy } from "./sqlite";
 
 export const REPLY_ROUTING_MIN_CONFIDENCE = 0.65;
@@ -53,49 +54,20 @@ const REPLY_ROUTING_QUESTION = {
   action: choice(
     "Choose the best response strategy for Veritheo based on the conversation, the bot message being replied to, and the user's reply. Choose ignore when the reply is vague, low-value, or only reacts to a command or operational notice without adding useful context.",
     {
-      playful: {
-        meaning:
-          "A joke or playful comment that merits a brief, friendly response.",
-        not_this:
-          "A bare reaction with no conversational value; choose ignore instead.",
-        examples: ["Jaja, era broma 😄", "Me ganaste con esa respuesta."],
-      },
-      add_context: {
-        meaning:
-          "Relevant details that change or refine the meaning of the previous exchange.",
-        examples: [
-          "Cuando dije iglesia, me refería a la comunidad de mi ciudad.",
-          "Me faltó decir que esto ocurrió antes del concilio.",
-        ],
-      },
-      follow_up: {
-        meaning:
-          "A question that depends on or explores Veritheo's previous answer.",
-        examples: ["¿Y cómo se entiende eso en Romanos 8?"],
-      },
-      disagreement: {
-        meaning:
-          "A challenge, correction, or reasoned disagreement with a substantive point in the previous answer.",
-        examples: [
-          "Creo que esa cita no dice eso en su contexto.",
-          "Pero mira lo que pasó en Inglaterra, ¿no podría pasar lo mismo aquí?",
-        ],
-      },
-      new_topic: {
-        meaning:
-          "A new, answerable question that does not depend on the previous exchange.",
-        examples: ["Cambiando de tema, ¿qué significa hesed?"],
-      },
-      general: {
-        meaning:
-          "Another meaningful conversational reply that deserves a concise response.",
-        examples: ["Eso aclara lo que estaba pensando."],
-      },
-      ignore: {
-        meaning:
-          "A vague or purely reactive reply, or a reply to a command or operational notice that adds no useful context.",
-        examples: ["Ok", "Jaja", "👍"],
-      },
+      playful:
+        'A joke or playful comment that merits a brief, friendly response. Classify a bare reaction as ignore. Examples: "Jaja, era broma 😄", "Me ganaste con esa respuesta."',
+      add_context:
+        'Relevant details that change or refine the previous exchange. Examples: "Cuando dije iglesia, me refería a la comunidad de mi ciudad.", "Me faltó decir que esto ocurrió antes del concilio."',
+      follow_up:
+        'A question that depends on or explores Veritheo\'s previous answer. Example: "¿Y cómo se entiende eso en Romanos 8?"',
+      disagreement:
+        'A challenge, correction, or reasoned disagreement with a substantive point in the previous answer. Examples: "Creo que esa cita no dice eso en su contexto.", "Pero mira lo que pasó en Inglaterra, ¿no podría pasar lo mismo aquí?"',
+      new_topic:
+        'A new, answerable question independent of the previous exchange. Example: "Cambiando de tema, ¿qué significa hesed?"',
+      general:
+        'Another meaningful conversational reply that deserves a concise response. Example: "Eso aclara lo que estaba pensando."',
+      ignore:
+        'A vague or purely reactive reply, or a reply to a command or operational notice that adds no useful context. Examples: "Ok", "Jaja", "👍".',
     },
   ),
   complexity: score(
@@ -125,7 +97,7 @@ export const REPLY_SYSTEM_INSTRUCTIONS: Record<ReplyStrategy, string> = {
 export async function classifyBotReply(
   state: ReplyRoutingState,
 ): Promise<ReplyRoutingClassification | undefined> {
-  const result = await runTypeSafeJudgment(
+  const result = await runGeminiDecision(
     "reply-routing",
     { state, questions: REPLY_ROUTING_QUESTION },
     { candidateCount: state.previousMessages.length + 2 },
@@ -152,7 +124,7 @@ export async function classifyBotReply(
     complexity.score <= REPLY_ROUTING_FAST_SCORE_MAX
       ? "fast"
       : "reasoning";
-  logTypeSafeDecision("reply-routing", {
+  logGeminiDecision("reply-routing", {
     decision: action,
     confidence: answer.confidence,
     modelTier,

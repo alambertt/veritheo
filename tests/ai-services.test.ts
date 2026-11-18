@@ -1,4 +1,17 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+
+let originalGeminiKey: string | undefined;
+
+beforeEach(() => {
+  originalGeminiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+});
+
+afterEach(() => {
+  if (originalGeminiKey !== undefined) {
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY = originalGeminiKey;
+  }
+});
 
 const calls: Array<Record<string, unknown>> = [];
 let generatedText = "mocked text result";

@@ -1,13 +1,13 @@
 import type { Database } from "bun:sqlite";
-import { choice } from "@typesafe-ai/sdk";
 import { queryMessages } from "./sqlite";
 import {
-  logTypeSafeDecision,
-  runTypeSafeJudgment,
-  TYPESAFE_MIN_CONFIDENCE,
-} from "./typesafe";
+  choice,
+  logGeminiDecision,
+  runGeminiDecision,
+  GEMINI_DECISIONS_MIN_CONFIDENCE,
+} from "./gemini-decisions";
 
-const TYPESAFE_CANDIDATE_LIMIT = 20;
+const SEMANTIC_CANDIDATE_LIMIT = 20;
 
 type SimilarityResult = {
   blocked: boolean;
@@ -244,7 +244,7 @@ function scanSimilarBotMessages(
       similarity: bestSimilarity,
       matchedMessageId: bestMessageId,
     },
-    candidates: candidates.slice(0, TYPESAFE_CANDIDATE_LIMIT),
+    candidates: candidates.slice(0, SEMANTIC_CANDIDATE_LIMIT),
   };
 }
 
@@ -292,7 +292,7 @@ export async function findSimilarBotMessageInChatWithJudgment(
       "This candidate is a previous bot response. Select it only when it answers the same request, even if the wording differs.";
   }
 
-  const judgment = await runTypeSafeJudgment(
+  const judgment = await runGeminiDecision(
     "self-message-guard",
     {
       state: {
@@ -317,7 +317,7 @@ export async function findSimilarBotMessageInChatWithJudgment(
   }
 
   const answer = judgment.answers.match;
-  logTypeSafeDecision("self-message-guard", {
+  logGeminiDecision("self-message-guard", {
     decision: answer.choice,
     confidence: answer.confidence,
     candidateCount: scan.candidates.length,
@@ -325,7 +325,7 @@ export async function findSimilarBotMessageInChatWithJudgment(
 
   if (
     answer.choice === "none" ||
-    answer.confidence < TYPESAFE_MIN_CONFIDENCE
+    answer.confidence < GEMINI_DECISIONS_MIN_CONFIDENCE
   ) {
     return scan.result;
   }

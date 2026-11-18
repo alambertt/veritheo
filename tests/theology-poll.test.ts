@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 
 const calls: Array<Record<string, unknown>> = [];
 let generatedText = "";
@@ -47,7 +47,11 @@ import {
 import { THEOLOGY_POLL_GROK_MODEL } from "../constants";
 
 describe("theology poll generation", () => {
+  let originalValidationFlag: string | undefined;
+
   beforeEach(() => {
+    originalValidationFlag = process.env.GEMINI_DECISIONS_THEOLOGY_POLL_VALIDATION;
+    process.env.GEMINI_DECISIONS_THEOLOGY_POLL_VALIDATION = "off";
     calls.length = 0;
     generateTextImpl = undefined;
     generatedText = JSON.stringify({
@@ -56,6 +60,14 @@ describe("theology poll generation", () => {
       correctOptionId: 0,
       explanation: "Athanasius is closely associated with defending Nicaea.",
     });
+  });
+
+  afterEach(() => {
+    if (originalValidationFlag === undefined) {
+      delete process.env.GEMINI_DECISIONS_THEOLOGY_POLL_VALIDATION;
+    } else {
+      process.env.GEMINI_DECISIONS_THEOLOGY_POLL_VALIDATION = originalValidationFlag;
+    }
   });
 
   it("parses valid model JSON into a quiz poll", () => {

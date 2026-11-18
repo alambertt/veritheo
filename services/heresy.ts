@@ -1,5 +1,4 @@
 // import { zhipu } from 'zhipu-ai-provider';
-import { score } from "@typesafe-ai/sdk";
 import { google } from "@ai-sdk/google";
 import { GOOGLE_MODEL_LATEST } from "../constants";
 import { heresyPrompt } from "../prompts/heresy";
@@ -9,10 +8,11 @@ import {
 } from "./generate-text-response";
 import { logTokenUsage } from "./token-usage";
 import {
-  logTypeSafeDecision,
-  runTypeSafeJudgment,
-  TYPESAFE_MIN_CONFIDENCE,
-} from "./typesafe";
+  logGeminiDecision,
+  runGeminiDecision,
+  score,
+  GEMINI_DECISIONS_MIN_CONFIDENCE,
+} from "./gemini-decisions";
 
 const HERESY_SELECTION_LIMIT = 10;
 const HERESY_MIN_DOCTRINAL_SCORE = 1;
@@ -45,12 +45,12 @@ export async function selectHeresyMessages(
     messages.map((_, index) => [
       `message_${index}`,
       score(
-        "How strong is the doctrinal signal in this message for identifying a historical theological position?",
+        `How strong is the doctrinal signal in messages[${index}].text for identifying a historical theological position?`,
         HERESY_SCORE_LEVELS,
       ),
     ]),
   );
-  const judgment = await runTypeSafeJudgment(
+  const judgment = await runGeminiDecision(
     "heresy-selection",
     {
       state: {
@@ -82,7 +82,7 @@ export async function selectHeresyMessages(
     })
     .filter(
       (candidate) =>
-        candidate.confidence >= TYPESAFE_MIN_CONFIDENCE &&
+        candidate.confidence >= GEMINI_DECISIONS_MIN_CONFIDENCE &&
         candidate.score >= HERESY_MIN_DOCTRINAL_SCORE,
     )
     .sort((a, b) => b.score - a.score || a.index - b.index)
@@ -93,7 +93,7 @@ export async function selectHeresyMessages(
   const confidence = ranked.length
     ? Math.min(...ranked.map((candidate) => candidate.confidence))
     : undefined;
-  logTypeSafeDecision("heresy-selection", {
+  logGeminiDecision("heresy-selection", {
     decision: selectedMessages.length ? `selected:${selectedMessages.length}` : "insufficient",
     confidence,
     candidateCount: messages.length,

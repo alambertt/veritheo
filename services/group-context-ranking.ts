@@ -1,9 +1,9 @@
-import { score } from "@typesafe-ai/sdk";
 import {
-  logTypeSafeDecision,
-  runTypeSafeJudgment,
-  TYPESAFE_MIN_CONFIDENCE,
-} from "./typesafe";
+  logGeminiDecision,
+  runGeminiDecision,
+  score,
+  GEMINI_DECISIONS_MIN_CONFIDENCE,
+} from "./gemini-decisions";
 
 const GROUP_CONTEXT_SELECTION_LIMIT = 5;
 
@@ -24,7 +24,7 @@ export async function rankGroupContextMessages(
     messages.map((_, index) => [
       `message_${index}`,
       score(
-        "How useful is this previous group message for answering the user's current question?",
+        `How useful is messages[${index}].text for answering the user's current question?`,
         [
           "Not useful: unrelated, decorative, or redundant context.",
           "Somewhat useful: related background but not needed for the answer.",
@@ -33,7 +33,7 @@ export async function rankGroupContextMessages(
       ),
     ]),
   );
-  const judgment = await runTypeSafeJudgment(
+  const judgment = await runGeminiDecision(
     "group-context-ranking",
     {
       state: {
@@ -66,14 +66,14 @@ export async function rankGroupContextMessages(
     })
     .filter(
       (candidate) =>
-        candidate.confidence >= TYPESAFE_MIN_CONFIDENCE &&
+        candidate.confidence >= GEMINI_DECISIONS_MIN_CONFIDENCE &&
         candidate.score >= 1,
     )
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .slice(0, GROUP_CONTEXT_SELECTION_LIMIT);
 
   if (ranked.length === 0) {
-    logTypeSafeDecision("group-context-ranking", {
+    logGeminiDecision("group-context-ranking", {
       decision: "current-context",
       candidateCount: messages.length,
     });
@@ -82,7 +82,7 @@ export async function rankGroupContextMessages(
 
   const selectedIndexes = new Set(ranked.map((candidate) => candidate.index));
   const selectedMessages = messages.filter((_, index) => selectedIndexes.has(index));
-  logTypeSafeDecision("group-context-ranking", {
+  logGeminiDecision("group-context-ranking", {
     decision: `selected:${selectedMessages.length}`,
     confidence: Math.min(...ranked.map((candidate) => candidate.confidence)),
     candidateCount: messages.length,

@@ -1,14 +1,14 @@
-import { noul } from "@typesafe-ai/sdk";
 import { xai } from '@ai-sdk/xai';
 import { THEOLOGY_POLL_GROK_MODEL } from '../constants';
 import { generateTextResponse } from './generate-text-response';
 import { logTokenUsage } from './token-usage';
 import { formatErrorForLog } from './log-redaction';
 import {
-  logTypeSafeDecision,
-  runTypeSafeJudgment,
-  TYPESAFE_MIN_CONFIDENCE,
-} from "./typesafe";
+  logGeminiDecision,
+  noul,
+  runGeminiDecision,
+  GEMINI_DECISIONS_MIN_CONFIDENCE,
+} from "./gemini-decisions";
 
 export const TELEGRAM_POLL_QUESTION_LIMIT = 300;
 export const TELEGRAM_POLL_OPTION_LIMIT = 100;
@@ -174,7 +174,7 @@ export async function validateTheologyQuizPollSemantics(
   poll: TheologyQuizPoll,
   language: 'en' | 'es',
 ): Promise<boolean | undefined> {
-  const judgment = await runTypeSafeJudgment("theology-poll-validation", {
+  const judgment = await runGeminiDecision("theology-poll-validation", {
     state: {
       question: poll.question,
       options: poll.options,
@@ -212,9 +212,9 @@ export async function validateTheologyQuizPollSemantics(
     answers.theologyPolicy.noul,
   ];
   const valid = probabilities.every(
-    (probability) => probability >= TYPESAFE_MIN_CONFIDENCE,
+    (probability) => probability >= GEMINI_DECISIONS_MIN_CONFIDENCE,
   );
-  logTypeSafeDecision("theology-poll-validation", {
+  logGeminiDecision("theology-poll-validation", {
     decision: valid ? "valid" : "retry",
     probability: Math.min(...probabilities),
   });
@@ -271,14 +271,14 @@ export async function generateTheologyQuizPoll(
       return poll;
     }
 
-    console.warn('TypeSafe rejected the theology poll; retrying once.');
+    console.warn('Gemini Decisions rejected the theology poll; retrying once.');
     const retryPoll = await generateAttempt();
     const retryValidation = await validateTheologyQuizPollSemantics(
       retryPoll,
       language,
     );
     if (retryValidation === false) {
-      throw new Error('TypeSafe rejected both theology poll attempts.');
+      throw new Error('Gemini Decisions rejected both theology poll attempts.');
     }
     return retryPoll;
   } catch (error) {

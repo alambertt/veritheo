@@ -1,6 +1,5 @@
 import { google } from "@ai-sdk/google";
 import type { Tool } from "ai";
-import { noul, score, type Questions } from "@typesafe-ai/sdk";
 import { GOOGLE_MODEL_LATEST } from "../constants";
 import { verifyPrompt } from "../prompts/verify";
 import {
@@ -9,10 +8,13 @@ import {
 } from "./generate-text-response";
 import { logTokenUsage } from "./token-usage";
 import {
-  logTypeSafeDecision,
-  runTypeSafeJudgment,
-  TYPESAFE_MIN_CONFIDENCE,
-} from "./typesafe";
+  logGeminiDecision,
+  noul,
+  runGeminiDecision,
+  score,
+  GEMINI_DECISIONS_MIN_CONFIDENCE,
+  type Questions,
+} from "./gemini-decisions";
 
 export const VERIFY_CLAIM_LIMIT = 12;
 
@@ -50,10 +52,10 @@ export async function selectVerifyClaims(
   const questions: Questions = {};
   for (const [index] of candidates.entries()) {
     questions[`checkable_${index}`] = noul(
-      "Can this exact candidate be checked against external theological evidence or a primary source?",
+      `Can the exact claim in claims[${index}].text be checked against external theological evidence or a primary source?`,
     );
     questions[`priority_${index}`] = score(
-      "How important is this candidate to verify in the final response?",
+      `How important is it to verify claims[${index}].text in the final response?`,
       [
         "Low priority: background, opinion, or a claim that does not affect the conclusion.",
         "Medium priority: a relevant claim that affects part of the conclusion.",
@@ -62,7 +64,7 @@ export async function selectVerifyClaims(
     );
   }
 
-  const judgment = await runTypeSafeJudgment(
+  const judgment = await runGeminiDecision(
     "verify-claims",
     {
       state: {
@@ -98,8 +100,8 @@ export async function selectVerifyClaims(
     })
     .filter(
       (candidate) =>
-        candidate.checkable >= TYPESAFE_MIN_CONFIDENCE &&
-        candidate.confidence >= TYPESAFE_MIN_CONFIDENCE &&
+        candidate.checkable >= GEMINI_DECISIONS_MIN_CONFIDENCE &&
+        candidate.confidence >= GEMINI_DECISIONS_MIN_CONFIDENCE &&
         candidate.score >= 1,
     )
     .sort((a, b) => b.score - a.score || a.index - b.index);
@@ -108,7 +110,7 @@ export async function selectVerifyClaims(
   const confidence = ranked.length
     ? Math.min(...ranked.map((candidate) => candidate.confidence))
     : undefined;
-  logTypeSafeDecision("verify-claims", {
+  logGeminiDecision("verify-claims", {
     decision: selectedClaims.length
       ? `selected:${selectedClaims.length}`
       : "current-message",

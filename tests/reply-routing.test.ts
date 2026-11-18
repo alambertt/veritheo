@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import {
   buildReplyRoutingState,
   classifyBotReply,
@@ -6,15 +6,19 @@ import {
   REPLY_SYSTEM_INSTRUCTIONS,
   resolveBotReplyStrategy,
 } from "../services/reply-routing";
-import {
-  isTypeSafeFeatureActive,
-  resetTypeSafeClientForTests,
-  setTypeSafeSystemOneForTests,
-} from "../services/typesafe";
+const originalApiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+const originalLegacyFlag = process.env.TYPESAFE_REPLY_ROUTING;
+let fetchMock: ReturnType<typeof spyOn<typeof globalThis, "fetch">>;
+
+beforeEach(() => {
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY = "test-key";
+  fetchMock = spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected request"));
+});
 
 afterEach(() => {
-  resetTypeSafeClientForTests();
-  delete process.env.TYPESAFE_REPLY_ROUTING;
+  fetchMock.mockRestore();
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY = originalApiKey;
+  process.env.TYPESAFE_REPLY_ROUTING = originalLegacyFlag;
 });
 
 describe("bot reply routing", () => {
@@ -39,13 +43,10 @@ describe("bot reply routing", () => {
     });
   });
 
-  it("classifies a reply with Jev and returns its confidence", async () => {
+  it("classifies a reply in one Gemini Decisions request with the legacy flag off", async () => {
     process.env.TYPESAFE_REPLY_ROUTING = "off";
-    let capturedRequest: unknown;
-    setTypeSafeSystemOneForTests(async (request) => {
-      capturedRequest = request;
-      return {
-        model: "test-model",
+    fetchMock.mockResolvedValue(
+      Response.json({
         answers: {
           action: {
             type: "choice",
@@ -61,9 +62,9 @@ describe("bot reply routing", () => {
             probabilities: { "0": 0.9, "1": 0.1 },
           },
         },
-        usage: { input_tokens: 1, output_tokens: 1 },
-      } as never;
-    });
+        usage: { total_input_tokens: 12, total_output_tokens: 0 },
+      }),
+    );
     const state = buildReplyRoutingState({
       previousMessages: [{ text: "My church is in Lima." }],
       botMessage: "The doctrine developed in several regions.",
@@ -77,14 +78,28 @@ describe("bot reply routing", () => {
       confidence: 0.92,
       modelTier: "fast",
     });
-    expect(capturedRequest).toMatchObject({ state });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, request] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/decisions");
+    expect(request).toMatchObject({
+      method: "POST",
+      headers: { "x-goog-api-key": "test-key", "Content-Type": "application/json" },
+    });
+    expect(request?.signal).toBeInstanceOf(AbortSignal);
+    expect(JSON.parse(request?.body as string)).toMatchObject({
+      model: "gemini-decision-1",
+      input: JSON.stringify(state),
+      questions: {
+        action: { type: "choice", criteria: { add_context: expect.any(String) } },
+        complexity: { type: "score", criteria: [expect.any(String), expect.any(String)] },
+      },
+    });
     expect(REPLY_SYSTEM_INSTRUCTIONS.add_context).toContain("refine");
   });
 
   it("routes replies that need careful reasoning to the reasoning tier", async () => {
-    setTypeSafeSystemOneForTests(async () =>
-      ({
-        model: "test-model",
+    fetchMock.mockResolvedValue(
+      Response.json({
         answers: {
           action: {
             type: "choice",
@@ -100,8 +115,7 @@ describe("bot reply routing", () => {
             probabilities: { "0": 0.16, "1": 0.84 },
           },
         },
-        usage: { input_tokens: 1, output_tokens: 1 },
-      }) as never,
+      }),
     );
 
     const result = await classifyBotReply({
@@ -114,9 +128,8 @@ describe("bot reply routing", () => {
   });
 
   it("uses the reasoning tier when complexity is uncertain", async () => {
-    setTypeSafeSystemOneForTests(async () =>
-      ({
-        model: "test-model",
+    fetchMock.mockResolvedValue(
+      Response.json({
         answers: {
           action: {
             type: "choice",
@@ -132,8 +145,7 @@ describe("bot reply routing", () => {
             probabilities: { "0": 0.6, "1": 0.4 },
           },
         },
-        usage: { input_tokens: 1, output_tokens: 1 },
-      }) as never,
+      }),
     );
 
     const result = await classifyBotReply({
@@ -159,10 +171,5 @@ describe("bot reply routing", () => {
     expect(resolveBotReplyStrategy({ action: "disagreement", confidence: 0.56 }, forced)).toBe("general");
     expect(resolveBotReplyStrategy({ action: "ignore", confidence: 0.99 }, forced)).toBe("general");
     expect(resolveBotReplyStrategy({ action: "follow_up", confidence: 0.9 }, forced)).toBe("follow_up");
-  });
-
-  it("keeps reply routing active even when its legacy flag is off", async () => {
-    process.env.TYPESAFE_REPLY_ROUTING = "off";
-    expect(isTypeSafeFeatureActive("reply-routing")).toBe(true);
   });
 });
