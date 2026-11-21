@@ -80,7 +80,7 @@ describe("AI-backed services", () => {
   it("returns ask handler results with metadata", async () => {
     const result = await askHandler("Question?", ["Context"]);
 
-    expect((calls.at(-1) as any).model.model).toBe("gemini-4-argon");
+    expect((calls.at(-1) as any).model.model).toBe("gemini-4-hydrogen");
     expect((calls.at(-1) as any).providerOptions.google.serviceTier).toBe("standard");
     expect(result.text).toBe("mocked text result");
     expect(result.sources).toEqual([
@@ -105,7 +105,7 @@ describe("AI-backed services", () => {
     });
 
     const lastCall = calls.at(-1) as any;
-    expect(lastCall.model.model).toBe("gemini-4-hydrogen");
+    expect(lastCall.model.model).toBe("gemini-3.8-flash");
     expect(lastCall.providerOptions.google.serviceTier).toBe("standard");
     expect(lastCall.tools).toBeUndefined();
     expect(lastCall.maxOutputTokens).toBe(400);
@@ -191,7 +191,7 @@ describe("AI-backed services", () => {
     expect(messageContent).toContain("Autor o remitente: Ada");
     expect(messageContent).toContain("Conversación: Grupo");
     expect(messageContent).toContain("Hola");
-    expect(lastCall.model.model).toBe("gemini-4-argon");
+    expect(lastCall.model.model).toBe("gemini-4-hydrogen");
     expect(lastCall.tools).toEqual({ google_search: "mock-search-tool" });
     expect(lastCall.providerOptions).toEqual({
       google: { serviceTier: "standard", thinkingConfig: { thinkingLevel: "medium" } },
@@ -205,7 +205,7 @@ describe("AI-backed services", () => {
 
     expect(messageContent).toContain("Autor o remitente: Ada");
     expect(messageContent).toContain("Texto");
-    expect(lastCall.model.model).toBe("gemini-4-hydrogen");
+    expect(lastCall.model.model).toBe("gemini-3.8-flash");
     expect(lastCall.providerOptions).toEqual({ google: { serviceTier: "flex" } });
   });
 
@@ -240,7 +240,7 @@ describe("AI-backed services", () => {
       expect(request.maxRetries).toBe(1);
       expect(request.timeout).toEqual({ totalMs: 60_000 });
       expect(request.providerOptions).toEqual({ google: { serviceTier: "flex" } });
-      expect(request.model.model).toBe("gemini-4-argon");
+      expect(request.model.model).toBe("gemini-4-hydrogen");
     });
 
     it("returns the generated text", async () => {

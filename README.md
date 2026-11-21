@@ -35,7 +35,7 @@ El bot revisa las peticiones dirigidas a él y guarda un registro de los intento
 
 El enrutamiento de respuestas está siempre activo. [Gemini Decisions](https://ai.google.dev/gemini-api/docs/decisions-api) clasifica las respuestas a mensajes conversacionales del bot y mide su complejidad en una llamada. Si la categoría permite responder pero su confianza es menor a `0.65`, el bot usa la estrategia general. Si Gemini Decisions falla, el bot continúa con el flujo normal de mensajes.
 
-Para respuestas sencillas, el bot usa Gemini 4 Hydrogen sin búsqueda web y con un límite de 400 tokens. Para respuestas complejas o de complejidad incierta, usa Gemini 4 Argon. Si falla la generación con Gemini, Grok conserva el mismo nivel de respuesta.
+Para respuestas sencillas, el bot usa Gemini 3.8 Flash sin búsqueda web y con un límite de 400 tokens. Para respuestas complejas o de complejidad incierta, usa Gemini 4 Hydrogen. Si falla la generación con Gemini, Grok conserva el mismo nivel de respuesta.
 
 ## Ejecución
 
