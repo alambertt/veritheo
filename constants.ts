@@ -1,4 +1,4 @@
-export const GOOGLE_MODEL_BASIC = 'gemini-3.8-flash';
+export const GOOGLE_MODEL_BASIC = 'gemini-4-hydrogen';
 export const GOOGLE_MODEL_PRO = "gemini-4-argon";
 export const GOOGLE_MODEL_LATEST = "gemini-4-argon";
 export const SIMILARITY_THRESHOLD = 0.91;
